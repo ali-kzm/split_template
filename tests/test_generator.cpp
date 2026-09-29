@@ -56,6 +56,39 @@ static int stratum_of(double t, int n, double lo, double hi) {
     return std::clamp(static_cast<int>(std::floor(u*n)),0,n-1);
 }
 
+static int read_section_count(const fs::path& p, const std::string& prefix) {
+    std::ifstream in(p);
+    std::string line;
+    while (std::getline(in,line)) {
+        if (line.rfind(prefix,0)!=0) continue;
+        std::istringstream row(line);
+        std::string tag;
+        int n=-1;
+        row >> tag >> n;
+        assert(row && n>=0);
+        return n;
+    }
+    assert(false);
+    return -1;
+}
+
+static int read_element_count(const fs::path& p) {
+    std::ifstream in(p);
+    std::string line;
+    while (std::getline(in,line)) {
+        if (line.rfind("METRICS ",0)!=0) continue;
+        const auto pos=line.find(" element_count ");
+        assert(pos!=std::string::npos);
+        std::istringstream row(line.substr(pos + std::string(" element_count ").size()));
+        int n=-1;
+        row >> n;
+        assert(row && n>=0);
+        return n;
+    }
+    assert(false);
+    return -1;
+}
+
 static void assert_jpeg(const fs::path& p, int expected_size) {
     FILE* f = std::fopen(p.string().c_str(), "rb");
     assert(f);
@@ -97,7 +130,12 @@ int main() {
         assert(fs::exists(jpg));
         const auto text = slurp(dat);
         assert(text.find("VALIDATION OK") != std::string::npos);
-        assert(text.find("PVMLS_TEMPLATE_DATA 1.0.0") != std::string::npos);
+        assert(text.find("PVMLS_TEMPLATE_DATA 2.0.0") != std::string::npos);
+        const int neg_edges=read_section_count(dat,"INTERFACE_EDGES_NEGATIVE ");
+        const int pos_edges=read_section_count(dat,"INTERFACE_EDGES_POSITIVE ");
+        assert(neg_edges>=1 && pos_edges>=1);
+        assert(neg_edges!=pos_edges);
+        assert(read_element_count(dat)<=cfg.max_elements);
         assert_jpeg(jpg, cfg.image_size);
     }
 
@@ -118,7 +156,11 @@ int main() {
     std::set<long long> case2_angles;
     for (int i=1;i<=sampling.templates_per_case;++i) {
         std::ostringstream name; name << "temp_" << std::setw(2) << std::setfill('0') << i << ".dat";
-        auto [x0,y0,t0,x1,y1,t1] = read_interface(sampling.output / "case_2" / name.str());
+        const auto dat=sampling.output / "case_2" / name.str();
+        auto [x0,y0,t0,x1,y1,t1] = read_interface(dat);
+        assert(read_section_count(dat,"INTERFACE_EDGES_NEGATIVE ") !=
+               read_section_count(dat,"INTERFACE_EDGES_POSITIVE "));
+        assert(read_element_count(dat)<=sampling.max_elements);
         (void)t0; (void)t1;
         const double angle=std::atan2(y1-y0,x1-x0);
         case2_angles.insert(static_cast<long long>(std::llround(angle*1e6)));
