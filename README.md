@@ -144,6 +144,8 @@ Example:
   --phi-zero-tol 1e-10 \
   --min-edge-fraction 1e-3 \
   --target-edge-length 0.3 \
+  --target-elements 10 \
+  --max-elements 20 \
   --min-triangle-quality 0.05 \
   --min-quad-quality 0.2 \
   --max-nodes 512 \
@@ -152,7 +154,9 @@ Example:
   --image-size 1024
 ```
 
-The generator uses one constrained triangulation for both phases, maximum-weight matching for admissible triangle pairs, constrained Laplacian smoothing with backtracking, validation, enrichment, phase-specific pressure numbering, then atomic publication of each `.dat`/JPEG pair.
+The generator meshes the negative and positive clipped phase polygons independently, then combines them into one template. Both phase boundaries lie on the same straight interface and share the prescribed interface endpoints, but **interior interface nodes are intentionally nonconforming**: for example, one side may use 5 interface nodes while the other uses 3. Maximum-weight matching is then applied independently through the disconnected phase connectivity to produce quad-dominant meshes, followed by constrained smoothing, validation, enrichment, phase-specific pressure numbering, and atomic publication of each `.dat`/JPEG pair.
+
+Mesh size is controlled primarily by `--target-elements` and `--max-elements`. The default objective is about **10 primary cells total** across both phases; the target is divided between phases using their areas with a balancing bias so both phases receive useful resolution. Difficult cuts may add cells for quality, but a successful template may never exceed the default hard cap of **20 primary cells**. `--target-edge-length` is retained as a legacy compatibility option and is no longer the primary mesh-size control.
 
 Quad dominance is an objective for the current admissible pairing graph, not a claim of globally optimal quadrilateral meshing. Valid unmatched triangles are retained. A finite template set does not cover arbitrarily degenerate cuts.
 
