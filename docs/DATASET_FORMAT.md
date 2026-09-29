@@ -1,6 +1,6 @@
 # PVMLS template dataset format
 
-Schema version: **1.0.0**
+Schema version: **2.0.0**
 
 Each accepted template is published as `case_<id>/temp_<NN>.dat` plus a matching genuine JPEG preview. `manifest.json` records accepted templates and failed generation requests.
 
@@ -8,26 +8,29 @@ The text file is line-oriented and human readable. Floating-point values are ser
 
 ## Sections
 
-- `PVMLS_TEMPLATE_DATA 1.0.0`
+- `PVMLS_TEMPLATE_DATA 2.0.0`
 - `META`: case, template index, seed and complete generation settings
 - `CORNERS`: canonical corner ID, coordinates, raw signed-distance phi and classified sign
 - `INTERFACE`: endpoints, explicit prescribed endpoint `phi=0`, supporting-line data and edge sampling parameters
-- `NODES`: shared geometric nodes, including enriched nodes
+- `NODES`: phase-owned geometric nodes, including enriched nodes
 - `PRESSURE_RECORDS`: local pressure ID -> geometric node ID + phase
 - `TRIANGLES`: phase, quality, P1 vertex connectivity, P2 connectivity
 - `QUADS`: phase, quality, Q1 vertex connectivity, Q2 connectivity
 - `PRESSURE_CONNECTIVITY`: pressure P1/Q1 connectivity per cell
 - `BOUNDARY_EDGES`: ordered primary-mesh square-boundary segments
-- `INTERFACE_EDGES`: ordered shared primary-mesh interface segments
+- `INTERFACE_EDGES_NEGATIVE`: ordered negative-side primary interface segments
+- `INTERFACE_EDGES_POSITIVE`: ordered positive-side primary interface segments
 - `METRICS`: min/mean triangle and quad quality, quad count fraction, quad area fraction, per-phase areas
 - `VALIDATION OK`
 - `END`
 
 ## Node fields
 
-`id ksi eta phi sign constraint parent_edge parent_segment parameter primary`
+`id ksi eta phi sign owner_phase constraint parent_edge parent_segment parameter primary`
 
-Constraint is one of `corner`, `boundary`, `interface`, or `interior`. `parent_edge=-1` means no square edge. `parent_segment=-1` means no interface segment. Interface endpoints on the square retain their square `parent_edge` while being classified as `interface`.
+Constraint is one of `corner`, `boundary`, `interface`, or `interior`. `owner_phase` is `-1` or `+1` and identifies which independently meshed phase owns the geometric node. `parent_edge=-1` means no square edge. For interface nodes, `parent_segment=0` denotes the negative-side interface chain and `parent_segment=1` denotes the positive-side chain.
+
+The two phases use the same straight geometric interface and the same prescribed endpoints, but their interior interface discretizations are deliberately **nonmatching**. Internal interface geometric node IDs are not shared across phases; one phase may contain more interface nodes than the other.
 
 Primary nodes are optimized first. Enriched nodes are then created as exact edge midpoints and quadrilateral bilinear centers. Shared edge midpoints are globally deduplicated within one template.
 
@@ -38,7 +41,7 @@ Primary nodes are optimized first. Enriched nodes are then created as exact edge
 - Quadrilateral Q1: `v0 v1 v2 v3`, counterclockwise.
 - Quadrilateral Q2: `v0 v1 v2 v3 m01 m12 m23 m30 center`.
 
-Pressure connectivity uses P1 for triangles and Q1 for quadrilaterals. Geometric interface vertices are shared, but pressure records are phase-specific, so an interface vertex incident to both phases has two local pressure IDs.
+Pressure connectivity uses P1 for triangles and Q1 for quadrilaterals. Because geometric nodes are phase-owned in schema 2.0, nonmatching interface nodes naturally have separate geometric and pressure identities on each side.
 
 ## Quality definitions
 
