@@ -203,23 +203,39 @@ double stratified(int idx, int n, double lo, double hi, std::mt19937_64& rng, in
     const double u=(static_cast<double>(idx)+std::fmod(U(rng)+0.173*salt,1.0))/static_cast<double>(n);
     return lo+(hi-lo)*std::clamp(u,0.0,1.0);
 }
-int permuted_stratum(int idx,int n,int salt){
-    if(n<=1)return 0;
-    int stride=2*salt+1;
-    while(std::gcd(stride,n)!=1)stride+=2;
-    const int offset=(3*salt+1)%n;
-    return (idx*stride+offset)%n;
+std::vector<int> stratum_permutation(int n,std::uint64_t seed,int cid){
+    std::vector<int> p(static_cast<std::size_t>(std::max(0,n)));
+    std::iota(p.begin(),p.end(),0);
+    if(n<=1)return p;
+    std::mt19937_64 prng(mix_seed(seed,cid,7919,0));
+    auto mirror_collision=[&](){
+        if(cid!=3)return false;
+        for(int i=0;i<n;++i)for(int k=i+1;k<n;++k){
+            if(p[static_cast<std::size_t>(i)]==n-1-k &&
+               p[static_cast<std::size_t>(k)]==n-1-i)return true;
+        }
+        return false;
+    };
+    for(int attempt=0;attempt<256;++attempt){
+        std::shuffle(p.begin(),p.end(),prng);
+        if(!mirror_collision())return p;
+    }
+    // Deterministic fallback; generation-time geometry de-duplication still
+    // protects against exact duplicates if an unusually small n is awkward.
+    return p;
 }
 InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std::mt19937_64& rng) {
     const double lo=cfg.min_edge_fraction, hi=1.0-cfg.min_edge_fraction;
     InterfaceGeom g;
     if (cid==2) {
-        const int j=permuted_stratum(tid,cfg.templates_per_case,1);
+        const auto perm=stratum_permutation(cfg.templates_per_case,cfg.seed,2);
+        const int j=perm[static_cast<std::size_t>(tid)];
         const double t0=stratified(tid,cfg.templates_per_case,lo,hi,rng,1);
         const double t3=stratified(j,cfg.templates_per_case,lo,hi,rng,2);
         g={edge_point(0,t0),edge_point(3,t3),t0,t3,0,3,1.0};
     } else if (cid==3) {
-        const int j=permuted_stratum(tid,cfg.templates_per_case,2);
+        const auto perm=stratum_permutation(cfg.templates_per_case,cfg.seed,3);
+        const int j=perm[static_cast<std::size_t>(tid)];
         double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,3);
         double t3=stratified(j,cfg.templates_per_case,lo,hi,rng,4);
         if(attempt>0){
