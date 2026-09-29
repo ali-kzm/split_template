@@ -292,11 +292,16 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
         bt[static_cast<std::size_t>(e)].insert(std::clamp(t,0.0,1.0));
         const double d=std::min(t,1.0-t);
         if(!(d>0.0))return;
+        const bool near_start=t<0.5;
+        const int adjacent=near_start ? (e+3)%4 : (e+1)%4;
         double s=d;
         const double target=std::min(0.25,h/2.0);
         while(s<target){
             if(t-s>0.0)bt[static_cast<std::size_t>(e)].insert(t-s);
             if(t+s<1.0)bt[static_cast<std::size_t>(e)].insert(t+s);
+            // Grade the other square edge incident to the same near corner.
+            const double ta=near_start ? 1.0-s : s;
+            if(ta>0.0&&ta<1.0)bt[static_cast<std::size_t>(adjacent)].insert(ta);
             s*=2.0;
         }
     };
