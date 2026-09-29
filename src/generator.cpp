@@ -51,7 +51,7 @@ using VH = CDT::Vertex_handle;
 
 constexpr double kGeomTol = 2e-11;
 constexpr double kAreaTol = 2e-8;
-constexpr const char* kSchemaVersion = "1.0.0";
+constexpr const char* kSchemaVersion = "2.0.0";
 
 struct P2 { double x{}, y{}; };
 struct InterfaceGeom {
@@ -71,6 +71,7 @@ struct Node {
     double parameter{-1.0};
     bool primary{true};
     bool fixed{false};
+    int owner_phase{0};
 };
 struct Tri {
     std::array<int,3> v{};
@@ -93,7 +94,7 @@ struct Mesh {
     std::vector<Quad> quads;
     std::vector<PressureRecord> pressures;
     std::vector<std::array<int,2>> boundary_edges;
-    std::vector<std::array<int,2>> interface_edges;
+    std::array<std::vector<std::array<int,2>>,2> interface_edges;
     InterfaceGeom iface;
     std::array<double,4> corner_phi{};
     std::array<int,4> corner_sign{};
@@ -483,7 +484,7 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
         if(t>=-kGeomTol&&t<=1+kGeomTol) iv.push_back({t,n.id});
     }
     std::sort(iv.begin(),iv.end());
-    for(std::size_t i=1;i<iv.size();++i) mesh.interface_edges.push_back({iv[i-1].second,iv[i].second});
+    for(std::size_t i=1;i<iv.size();++i) mesh.interface_edges[0].push_back({iv[i-1].second,iv[i].second});
     return mesh;
 }
 
