@@ -981,7 +981,11 @@ void validate_mesh(Mesh&m,const Config&cfg,int cid){
     double area=0;
     for(const auto&t:m.tris){
         const double q=triangle_quality(m.nodes[t.v[0]].p,m.nodes[t.v[1]].p,m.nodes[t.v[2]].p);
-        if(q+1e-12<cfg.min_triangle_quality)throw std::runtime_error("triangle quality threshold violated");
+        if(q+1e-12<cfg.min_triangle_quality){
+            std::ostringstream msg;msg<<"triangle quality threshold violated: q="<<q<<" phase="<<t.phase
+                                      <<" threshold="<<cfg.min_triangle_quality;
+            throw std::runtime_error(msg.str());
+        }
         std::vector<int> vv(t.v.begin(),t.v.end()); if(cell_crosses_interface(m,vv,t.phase,cfg))throw std::runtime_error("triangle crosses interface");
         auto sig=vv;std::sort(sig.begin(),sig.end());if(!cells.insert(sig).second)throw std::runtime_error("duplicate cell");
         const double a=0.5*cross(m.nodes[t.v[0]].p,m.nodes[t.v[1]].p,m.nodes[t.v[2]].p);if(!(a>0))throw std::runtime_error("inverted triangle");area+=a;
@@ -989,7 +993,11 @@ void validate_mesh(Mesh&m,const Config&cfg,int cid){
     }
     for(const auto&q:m.quads){
         std::array<P2,4> p{m.nodes[q.v[0]].p,m.nodes[q.v[1]].p,m.nodes[q.v[2]].p,m.nodes[q.v[3]].p};
-        const double qual=quad_quality(p);if(qual+1e-12<cfg.min_quad_quality)throw std::runtime_error("quad quality threshold violated");
+        const double qual=quad_quality(p);if(qual+1e-12<cfg.min_quad_quality){
+            std::ostringstream msg;msg<<"quad quality threshold violated: q="<<qual<<" phase="<<q.phase
+                                      <<" threshold="<<cfg.min_quad_quality;
+            throw std::runtime_error(msg.str());
+        }
         if(!convex_quad(m,q.v))throw std::runtime_error("nonconvex quad");
         std::vector<int> vv(q.v.begin(),q.v.end());if(cell_crosses_interface(m,vv,q.phase,cfg))throw std::runtime_error("quad crosses interface");
         auto sig=vv;std::sort(sig.begin(),sig.end());if(!cells.insert(sig).second)throw std::runtime_error("duplicate cell");
