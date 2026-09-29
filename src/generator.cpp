@@ -680,11 +680,11 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
     target_neg=std::clamp(target_neg,min_each,cfg.target_elements-min_each);
     const int target_pos=cfg.target_elements-target_neg;
 
-    const int extra=cfg.max_elements-cfg.target_elements;
-    int extra_neg=extra>0?static_cast<int>(std::lround(extra*wn/(wn+wp))):0;
-    extra_neg=std::clamp(extra_neg,0,std::max(0,extra));
-    const int max_neg=target_neg+extra_neg;
-    const int max_pos=target_pos+(extra-extra_neg);
+    // Refinement budget is shared dynamically. Either phase may consume
+    // unused capacity from the other, while final validation still enforces
+    // the global max_elements hard cap.
+    const int max_neg=std::max(target_neg,cfg.max_elements-target_pos);
+    const int max_pos=std::max(target_pos,cfg.max_elements-target_neg);
 
     int seg_neg=std::clamp((target_neg+1)/2,1,4);
     int seg_pos=std::clamp((target_pos+1)/2,1,4);
