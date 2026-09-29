@@ -215,7 +215,26 @@ InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std
         const double t3=1.0-stratified(tid,cfg.templates_per_case,lo,hi,rng,4);
         g={edge_point(1,t1),edge_point(3,t3),t1,t3,1,3,1.0};
     } else if (cid==6) {
-        const double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,5);
+        double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,5);
+        if(attempt>0){
+            // At corner 0 the negative phase contains a wedge with angle atan(t1).
+            // Its best possible conforming triangle quality is bounded by that angle.
+            // Preserve the exact near-limit sample as attempt 0, but on rejection
+            // deterministically resample above the quality-admissible lower bound.
+            auto wedge_quality=[](double t){
+                const double theta=std::atan(t);
+                return std::sqrt(3.0)*std::sin(theta)/(2.0-std::cos(theta));
+            };
+            double a=lo,b=hi;
+            if(wedge_quality(b)<cfg.min_triangle_quality)
+                throw std::runtime_error("case 6 quality threshold is incompatible with permitted interface interval");
+            for(int k=0;k<60;++k){
+                const double mid=0.5*(a+b);
+                if(wedge_quality(mid)<cfg.min_triangle_quality)a=mid;else b=mid;
+            }
+            const double safe=std::min(hi,b*1.15+1e-6);
+            t1=std::max(t1,safe);
+        }
         g={corners[0],edge_point(1,t1),0.0,t1,0,1,1.0};
     } else if (cid==11) {
         g={corners[0],corners[2],0.0,1.0,0,2,1.0};
@@ -233,7 +252,6 @@ InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std
     if (score(1.0)!=4) {
         if (score(-1.0)!=4) throw std::runtime_error("sampled interface does not realize requested sign family");
     }
-    (void)attempt;
     return g;
 }
 Node make_node(P2 p,const InterfaceGeom& g,const Config& cfg,bool primary=true) {
