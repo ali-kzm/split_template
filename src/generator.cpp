@@ -211,9 +211,22 @@ InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std
         const double t3=1.0-stratified(tid,cfg.templates_per_case,lo,hi,rng,2);
         g={edge_point(0,t0),edge_point(3,t3),t0,t3,0,3,1.0};
     } else if (cid==3) {
-        const double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,3);
+        double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,3);
         const int shifted=(tid+std::max(1,cfg.templates_per_case/2))%cfg.templates_per_case;
-        const double t3=stratified(shifted,cfg.templates_per_case,lo,hi,rng,4);
+        double t3=stratified(shifted,cfg.templates_per_case,lo,hi,rng,4);
+        if(attempt>0){
+            // Endpoint strata are intentionally tried exactly at the configured
+            // interval limits first. If that geometry cannot satisfy the quality
+            // threshold, retry at the center of the same boundary stratum.
+            const double inset=0.5*(hi-lo)/static_cast<double>(cfg.templates_per_case);
+            auto retry_inset=[&](double t){
+                if(t<=lo+1e-15)return std::min(hi,lo+inset);
+                if(t>=hi-1e-15)return std::max(lo,hi-inset);
+                return t;
+            };
+            t1=retry_inset(t1);
+            t3=retry_inset(t3);
+        }
         g={edge_point(1,t1),edge_point(3,t3),t1,t3,1,3,1.0};
     } else if (cid==6) {
         double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,5);
