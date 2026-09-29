@@ -208,7 +208,7 @@ InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std
     InterfaceGeom g;
     if (cid==2) {
         const double t0=stratified(tid,cfg.templates_per_case,lo,hi,rng,1);
-        const double t3=stratified((tid*7+3)%cfg.templates_per_case,cfg.templates_per_case,lo,hi,rng,2);
+        const double t3=1.0-stratified(tid,cfg.templates_per_case,lo,hi,rng,2);
         g={edge_point(0,t0),edge_point(3,t3),t0,t3,0,3,1.0};
     } else if (cid==3) {
         const double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,3);
@@ -245,7 +245,8 @@ Node make_node(P2 p,const InterfaceGeom& g,const Config& cfg,bool primary=true) 
     if (at_corner(p,&ci)) {
         n.constraint="corner"; n.parent_edge=ci; n.fixed=true;
     } else if (on_iface) {
-        n.constraint="interface"; n.parent_segment=0; n.fixed=false;
+        n.constraint="interface"; n.parent_segment=0;
+        n.fixed=(dist2(p,g.a)<=1e-22 || dist2(p,g.b)<=1e-22);
         n.parameter=((p.x-g.a.x)*(g.b.x-g.a.x)+(p.y-g.a.y)*(g.b.y-g.a.y))/dist2(g.a,g.b);
         n.parent_edge=be;
     } else if (be>=0) {
@@ -279,16 +280,61 @@ bool inside_square(P2 p) {
 
 Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,std::mt19937_64& rng) {
     CDT cdt;
-    std::vector<std::vector<VH>> boundary(4);
     const double h=cfg.target_edge_length;
-    for (int e=0;e<4;++e) {
-        auto pts=sample_segment(corners[static_cast<std::size_t>(e)],corners[static_cast<std::size_t>((e+1)%4)],h,true);
-        for (auto p:pts) boundary[static_cast<std::size_t>(e)].push_back(cdt.insert(Point(p.x,p.y)));
+    std::array<std::set<double>,4> bt;
+    for(int e=0;e<4;++e){
+        const int n=std::max(1,static_cast<int>(std::ceil(2.0/h)));
+        for(int i=0;i<=n;++i)bt[static_cast<std::size_t>(e)].insert(static_cast<double>(i)/n);
+    }
+    auto grade_boundary=[&](P2 p,int e){
+        if(e<0)return;
+        const double t=edge_parameter(e,p);
+        bt[static_cast<std::size_t>(e)].insert(std::clamp(t,0.0,1.0));
+        const double d=std::min(t,1.0-t);
+        if(!(d>0.0))return;
+        double s=d;
+        const double target=std::min(0.25,h/2.0);
+        while(s<target){
+            if(t-s>0.0)bt[static_cast<std::size_t>(e)].insert(t-s);
+            if(t+s<1.0)bt[static_cast<std::size_t>(e)].insert(t+s);
+            s*=2.0;
+        }
+    };
+    grade_boundary(iface.a,iface.edge_a);
+    grade_boundary(iface.b,iface.edge_b);
+
+    std::vector<std::vector<VH>> boundary(4);
+    for(int e=0;e<4;++e){
+        for(double t:bt[static_cast<std::size_t>(e)]){
+            const auto p=edge_point(e,t);
+            boundary[static_cast<std::size_t>(e)].push_back(cdt.insert(Point(p.x,p.y)));
+        }
         add_constraint_chain(cdt,boundary[static_cast<std::size_t>(e)]);
     }
-    auto ipts=sample_segment(iface.a,iface.b,h,true);
+
+    std::set<double> it;
+    const double L=std::sqrt(dist2(iface.a,iface.b));
+    const int ni=std::max(1,static_cast<int>(std::ceil(L/h)));
+    for(int i=0;i<=ni;++i)it.insert(static_cast<double>(i)/ni);
+    auto grade_interface=[&](P2 p,int e,bool from_a){
+        if(e<0||!(L>0.0))return;
+        const double t=edge_parameter(e,p);
+        const double physical=2.0*std::min(t,1.0-t);
+        if(!(physical>0.0))return;
+        double tau=physical/L;
+        while(tau<1.0){
+            if(from_a)it.insert(std::min(1.0,tau)); else it.insert(std::max(0.0,1.0-tau));
+            if(tau*L>=h)break;
+            tau*=2.0;
+        }
+    };
+    grade_interface(iface.a,iface.edge_a,true);
+    grade_interface(iface.b,iface.edge_b,false);
     std::vector<VH> ichain;
-    for (auto p:ipts) ichain.push_back(cdt.insert(Point(p.x,p.y)));
+    for(double t:it){
+        P2 p{iface.a.x+t*(iface.b.x-iface.a.x),iface.a.y+t*(iface.b.y-iface.a.y)};
+        ichain.push_back(cdt.insert(Point(p.x,p.y)));
+    }
     add_constraint_chain(cdt,ichain);
 
     const int nx=std::max(2,static_cast<int>(std::ceil(2.0/h)));
