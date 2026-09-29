@@ -546,7 +546,12 @@ double min_polygon_edge_distance(const std::vector<P2>& poly,P2 p){
 
 int finite_face_count(const CDT& cdt){
     int n=0;
-    for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f)++n;
+    for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f){
+        P2 a{CGAL::to_double(f->vertex(0)->point().x()),CGAL::to_double(f->vertex(0)->point().y())};
+        P2 b{CGAL::to_double(f->vertex(1)->point().x()),CGAL::to_double(f->vertex(1)->point().y())};
+        P2 c{CGAL::to_double(f->vertex(2)->point().x()),CGAL::to_double(f->vertex(2)->point().y())};
+        if(std::abs(cross(a,b,c))>kGeomTol)++n;
+    }
     return n;
 }
 
@@ -617,9 +622,11 @@ void append_phase_triangulation(Mesh& mesh,const Config& cfg,const InterfaceGeom
             P2 a{CGAL::to_double(f->vertex(0)->point().x()),CGAL::to_double(f->vertex(0)->point().y())};
             P2 b{CGAL::to_double(f->vertex(1)->point().x()),CGAL::to_double(f->vertex(1)->point().y())};
             P2 c{CGAL::to_double(f->vertex(2)->point().x()),CGAL::to_double(f->vertex(2)->point().y())};
+            const double orient=cross(a,b,c);
+            if(std::abs(orient)<=kGeomTol)continue;
             P2 cen{(a.x+b.x+c.x)/3.0,(a.y+b.y+c.y)/3.0};
             if(!inside_convex_polygon(poly,cen))continue;
-            if(cross(a,b,c)<0)std::swap(b,c);
+            if(orient<0)std::swap(b,c);
             const double q=triangle_quality(a,b,c);
             if(q<worst){worst=q;candidate=cen;}
         }
@@ -646,6 +653,8 @@ void append_phase_triangulation(Mesh& mesh,const Config& cfg,const InterfaceGeom
     for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f){
         P2 p[3];
         for(int k=0;k<3;++k)p[k]={CGAL::to_double(f->vertex(k)->point().x()),CGAL::to_double(f->vertex(k)->point().y())};
+        const double orient=cross(p[0],p[1],p[2]);
+        if(std::abs(orient)<=kGeomTol)continue;
         P2 cen{(p[0].x+p[1].x+p[2].x)/3.0,(p[0].y+p[1].y+p[2].y)/3.0};
         if(!inside_convex_polygon(poly,cen))continue;
         const int cs=classify_phi(phi_raw(iface,cen),cfg.phi_zero_tol);
