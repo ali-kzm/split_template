@@ -5,13 +5,17 @@ extern "C" {
 }
 
 #include <cassert>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -21,6 +25,35 @@ static std::string slurp(const fs::path& p) {
     std::ostringstream out;
     out << in.rdbuf();
     return out.str();
+}
+
+static std::tuple<double,double,double,double,double,double> read_interface(const fs::path& p) {
+    std::ifstream in(p);
+    std::string line;
+    double x0=0.0,y0=0.0,t0=0.0,x1=0.0,y1=0.0,t1=0.0;
+    bool have0=false,have1=false;
+    while (std::getline(in,line)) {
+        if (line.rfind("INTERFACE_ENDPOINT ",0)!=0) continue;
+        std::istringstream row(line);
+        std::string tag, phi_tag, edge_tag, parameter_tag;
+        int endpoint=-1, edge=-1;
+        double x=0.0,y=0.0,phi=1.0,t=0.0;
+        row >> tag >> endpoint >> x >> y >> phi_tag >> phi >> edge_tag >> edge >> parameter_tag >> t;
+        assert(row);
+        assert(phi_tag=="phi");
+        assert(phi==0.0);
+        assert(edge_tag=="edge");
+        assert(parameter_tag=="parameter");
+        if (endpoint==0) { x0=x; y0=y; t0=t; have0=true; }
+        if (endpoint==1) { x1=x; y1=y; t1=t; have1=true; }
+    }
+    assert(have0&&have1);
+    return {x0,y0,t0,x1,y1,t1};
+}
+
+static int stratum_of(double t, int n, double lo, double hi) {
+    const double u=(t-lo)/(hi-lo);
+    return std::clamp(static_cast<int>(std::floor(u*n)),0,n-1);
 }
 
 static void assert_jpeg(const fs::path& p, int expected_size) {
@@ -66,6 +99,49 @@ int main() {
         assert(text.find("VALIDATION OK") != std::string::npos);
         assert(text.find("PVMLS_TEMPLATE_DATA 1.0.0") != std::string::npos);
         assert_jpeg(jpg, cfg.image_size);
+    }
+
+    // Sampling regression: case 2 must contain multiple interface slopes,
+    // and case 3 must not contain vertical-flip-equivalent stratum pairs.
+    pvmls::Config sampling;
+    sampling.output = root / "sampling_regression";
+    sampling.templates_per_case = 9;
+    sampling.cases = {2, 3};
+    sampling.seed = 24301;
+    sampling.min_edge_fraction = 0.02;
+    sampling.target_edge_length = 0.5;
+    sampling.image_size = 96;
+    sampling.overwrite = true;
+    auto sampling_s = pvmls::generate_dataset(sampling);
+    assert(sampling_s.success && sampling_s.accepted == 18);
+
+    std::set<long long> case2_angles;
+    for (int i=1;i<=sampling.templates_per_case;++i) {
+        std::ostringstream name; name << "temp_" << std::setw(2) << std::setfill('0') << i << ".dat";
+        auto [x0,y0,t0,x1,y1,t1] = read_interface(sampling.output / "case_2" / name.str());
+        (void)t0; (void)t1;
+        const double angle=std::atan2(y1-y0,x1-x0);
+        case2_angles.insert(static_cast<long long>(std::llround(angle*1e6)));
+    }
+    assert(case2_angles.size() >= 4);
+
+    std::vector<std::pair<int,int>> case3_strata;
+    for (int i=1;i<=sampling.templates_per_case;++i) {
+        std::ostringstream name; name << "temp_" << std::setw(2) << std::setfill('0') << i << ".dat";
+        auto [x0,y0,t0,x1,y1,t1] = read_interface(sampling.output / "case_3" / name.str());
+        (void)x0; (void)y0; (void)x1; (void)y1;
+        case3_strata.push_back({
+            stratum_of(t0,sampling.templates_per_case,sampling.min_edge_fraction,1.0-sampling.min_edge_fraction),
+            stratum_of(t1,sampling.templates_per_case,sampling.min_edge_fraction,1.0-sampling.min_edge_fraction)
+        });
+    }
+    for (std::size_t i=0;i<case3_strata.size();++i) {
+        for (std::size_t j=i+1;j<case3_strata.size();++j) {
+            const bool vertical_flip =
+                case3_strata[i].first + case3_strata[j].first == sampling.templates_per_case-1 &&
+                case3_strata[i].second + case3_strata[j].second == sampling.templates_per_case-1;
+            assert(!vertical_flip);
+        }
     }
 
     // Case 11 must keep fixed interface geometry while varying interior layout.
