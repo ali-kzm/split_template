@@ -281,9 +281,18 @@ bool inside_square(P2 p) {
 Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,std::mt19937_64& rng) {
     CDT cdt;
     const double h=cfg.target_edge_length;
+    // Case 6 can approach a thin strip above edge 0 when the right-edge
+    // crossing approaches corner 1. Resolve that strip using spacing tied
+    // to its physical thickness instead of relaxing the quality threshold.
+    double thin_h=h;
+    if(cid==6){
+        const double thickness=2.0*std::clamp(iface.pb,0.0,1.0);
+        if(thickness>0.0)thin_h=std::min(h,20.0*thickness);
+    }
     std::array<std::set<double>,4> bt;
     for(int e=0;e<4;++e){
-        const int n=std::max(1,static_cast<int>(std::ceil(2.0/h)));
+        const double eh=(cid==6 && e==0)?thin_h:h;
+        const int n=std::max(1,static_cast<int>(std::ceil(2.0/eh)));
         for(int i=0;i<=n;++i)bt[static_cast<std::size_t>(e)].insert(static_cast<double>(i)/n);
     }
     auto grade_boundary=[&](P2 p,int e){
@@ -319,7 +328,8 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
 
     std::set<double> it;
     const double L=std::sqrt(dist2(iface.a,iface.b));
-    const int ni=std::max(1,static_cast<int>(std::ceil(L/h)));
+    const double ih=(cid==6)?thin_h:h;
+    const int ni=std::max(1,static_cast<int>(std::ceil(L/ih)));
     for(int i=0;i<=ni;++i)it.insert(static_cast<double>(i)/ni);
     auto grade_interface=[&](P2 p,int e,bool from_a){
         if(e<0||!(L>0.0))return;
