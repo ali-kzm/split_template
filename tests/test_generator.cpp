@@ -89,9 +89,19 @@ static int read_element_count(const fs::path& p) {
     return -1;
 }
 
+static void require_success(const pvmls::GenerationSummary& s) {
+    if (s.success) return;
+    std::cerr << "generation failed: accepted=" << s.accepted << "/" << s.requested << "\n";
+    for (const auto& f : s.failures) std::cerr << "  " << f << "\n";
+    std::abort();
+}
+
 static void assert_jpeg(const fs::path& p, int expected_size) {
     FILE* f = std::fopen(p.string().c_str(), "rb");
-    assert(f);
+    if (!f) {
+        std::cerr << "missing JPEG: " << p << "\n";
+        std::abort();
+    }
     jpeg_decompress_struct cinfo{};
     jpeg_error_mgr jerr{};
     cinfo.err = jpeg_std_error(&jerr);
@@ -121,7 +131,7 @@ int main() {
     cfg.image_size = 192;
     cfg.overwrite = true;
     auto s = pvmls::generate_dataset(cfg);
-    assert(s.success);
+    require_success(s);
     assert(s.accepted == 4);
     for (int id : cfg.cases) {
         const auto dat = cfg.output / ("case_" + std::to_string(id)) / "temp_01.dat";
@@ -151,7 +161,8 @@ int main() {
     sampling.image_size = 96;
     sampling.overwrite = true;
     auto sampling_s = pvmls::generate_dataset(sampling);
-    assert(sampling_s.success && sampling_s.accepted == 18);
+    require_success(sampling_s);
+    assert(sampling_s.accepted == 18);
 
     std::set<long long> case2_angles;
     for (int i=1;i<=sampling.templates_per_case;++i) {
@@ -193,7 +204,8 @@ int main() {
     cfg.seed = 2002;
     cfg.overwrite = true;
     s = pvmls::generate_dataset(cfg);
-    assert(s.success && s.accepted == 2);
+    require_success(s);
+    assert(s.accepted == 2);
     const auto a = slurp(cfg.output / "case_11/temp_01.dat");
     const auto b = slurp(cfg.output / "case_11/temp_02.dat");
     assert(a != b);
@@ -210,8 +222,8 @@ int main() {
     r1.overwrite = true;
     auto r2 = r1;
     r2.output = root / "repro_b";
-    assert(pvmls::generate_dataset(r1).success);
-    assert(pvmls::generate_dataset(r2).success);
+    const auto rs1=pvmls::generate_dataset(r1); require_success(rs1);
+    const auto rs2=pvmls::generate_dataset(r2); require_success(rs2);
     assert(slurp(r1.output / "case_3/temp_01.dat") == slurp(r2.output / "case_3/temp_01.dat"));
 
     // Resource-limit failure must be explicit and must not publish an invalid pair.
@@ -237,7 +249,7 @@ int main() {
     near.image_size = 128;
     near.overwrite = true;
     auto near_s = pvmls::generate_dataset(near);
-    assert(near_s.success);
+    require_success(near_s);
 
     fs::remove_all(root);
     std::cout << "all tests passed\n";
