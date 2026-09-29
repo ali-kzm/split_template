@@ -16,7 +16,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build g++ libcgal-dev libboost-graph-dev libjpeg-dev
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DPVMLS_ENABLE_ASAN=ON
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DPVMLS_ENABLE_ASAN=ON
       - name: Build
         run: cmake --build build
       - name: Test
