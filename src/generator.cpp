@@ -892,7 +892,10 @@ void enrich(Mesh&m,const Config&cfg){
         auto k=edge_key(a,b);auto it=mids.find(k);if(it!=mids.end())return it->second;
         P2 p{0.5*(m.nodes[a].p.x+m.nodes[b].p.x),0.5*(m.nodes[a].p.y+m.nodes[b].p.y)};
         Node n=make_node(p,m.iface,cfg,false);n.id=static_cast<int>(m.nodes.size());
-        if(std::abs(m.nodes[a].phi)<=cfg.phi_zero_tol&&std::abs(m.nodes[b].phi)<=cfg.phi_zero_tol){n.constraint="interface";n.phi=0;n.sign=0;n.parent_segment=0;}
+        n.owner_phase=(m.nodes[a].owner_phase==m.nodes[b].owner_phase)?m.nodes[a].owner_phase:0;
+        if(std::abs(m.nodes[a].phi)<=cfg.phi_zero_tol&&std::abs(m.nodes[b].phi)<=cfg.phi_zero_tol){
+            n.constraint="interface";n.phi=0;n.sign=0;n.parent_segment=n.owner_phase<0?0:1;
+        }
         m.nodes.push_back(n);mids[k]=n.id;return n.id;
     };
     for(auto&t:m.tris){
@@ -902,7 +905,7 @@ void enrich(Mesh&m,const Config&cfg){
         q.q2[0]=q.v[0];q.q2[1]=q.v[1];q.q2[2]=q.v[2];q.q2[3]=q.v[3];
         q.q2[4]=midpoint(q.v[0],q.v[1]);q.q2[5]=midpoint(q.v[1],q.v[2]);q.q2[6]=midpoint(q.v[2],q.v[3]);q.q2[7]=midpoint(q.v[3],q.v[0]);
         P2 p{};for(int id:q.v){p.x+=m.nodes[id].p.x;p.y+=m.nodes[id].p.y;}p.x/=4;p.y/=4;
-        Node n=make_node(p,m.iface,cfg,false);n.id=static_cast<int>(m.nodes.size());m.nodes.push_back(n);q.q2[8]=n.id;
+        Node n=make_node(p,m.iface,cfg,false);n.id=static_cast<int>(m.nodes.size());n.owner_phase=q.phase;m.nodes.push_back(n);q.q2[8]=n.id;
     }
     if(m.nodes.size()>cfg.max_nodes)throw std::runtime_error("enriched node count exceeds max-nodes");
 
@@ -924,6 +927,8 @@ bool cell_crosses_interface(const Mesh&m,const std::vector<int>&v,int phase,cons
 }
 void validate_mesh(Mesh&m,const Config&cfg,int cid){
     if(m.nodes.empty())throw std::runtime_error("no nodes");
+    const int primary_cells=static_cast<int>(m.tris.size()+m.quads.size());
+    if(primary_cells>cfg.max_elements)throw std::runtime_error("primary element count exceeds max-elements");
     const auto want=expected_signs(cid);
     for(int i=0;i<4;++i){
         const double ph=phi_raw(m.iface,corners[static_cast<std::size_t>(i)]);
@@ -936,6 +941,19 @@ void validate_mesh(Mesh&m,const Config&cfg,int cid){
         if(!inside_square(n.p))throw std::runtime_error("node outside square");
         if(n.constraint=="boundary"&&boundary_edge(n.p)!=n.parent_edge)throw std::runtime_error("boundary constraint violation");
         if(n.constraint=="interface"&&std::abs(phi_raw(m.iface,n.p))>1e-8)throw std::runtime_error("interface constraint violation");
+        if(n.owner_phase!= -1 && n.owner_phase!=1)throw std::runtime_error("node missing phase ownership");
+    }
+    const double interface_length=std::sqrt(dist2(m.iface.a,m.iface.b));
+    for(std::size_t side=0;side<2;++side){
+        if(m.interface_edges[side].empty())throw std::runtime_error("missing phase-specific interface chain");
+        double length=0.0;
+        const int expected=side==0?-1:1;
+        for(const auto&e:m.interface_edges[side]){
+            if(m.nodes[e[0]].owner_phase!=expected||m.nodes[e[1]].owner_phase!=expected)
+                throw std::runtime_error("interface edge ownership mismatch");
+            length+=std::sqrt(dist2(m.nodes[e[0]].p,m.nodes[e[1]].p));
+        }
+        if(std::abs(length-interface_length)>1e-8)throw std::runtime_error("interface chain length mismatch");
     }
     std::set<std::vector<int>> cells;
     std::map<std::array<int,2>,int> incidence;
@@ -977,7 +995,8 @@ std::string serialize(const Mesh&m,const Config&cfg,int cid,int tid,std::uint64_
     o<<"PVMLS_TEMPLATE_DATA "<<kSchemaVersion<<"\n";
     o<<"META\nCASE "<<cid<<"\nTEMPLATE "<<tid<<"\nSEED "<<seed<<"\n";
     o<<"CONFIG phi_zero_tol "<<cfg.phi_zero_tol<<" min_edge_fraction "<<cfg.min_edge_fraction
-     <<" target_edge_length "<<cfg.target_edge_length<<" min_triangle_quality "<<cfg.min_triangle_quality
+     <<" target_edge_length "<<cfg.target_edge_length<<" target_elements "<<cfg.target_elements
+     <<" max_elements "<<cfg.max_elements<<" min_triangle_quality "<<cfg.min_triangle_quality
      <<" min_quad_quality "<<cfg.min_quad_quality<<" max_nodes "<<cfg.max_nodes
      <<" max_attempts_per_template "<<cfg.max_attempts_per_template<<" max_smoothing_passes "<<cfg.max_smoothing_passes
      <<" image_size "<<cfg.image_size<<"\n";
@@ -988,8 +1007,8 @@ std::string serialize(const Mesh&m,const Config&cfg,int cid,int tid,std::uint64_
     o<<"INTERFACE_ENDPOINT 1 "<<m.iface.b.x<<" "<<m.iface.b.y<<" phi 0 edge "<<m.iface.edge_b<<" parameter "<<m.iface.pb<<"\n";
     o<<"INTERFACE_SIGN_FACTOR "<<m.iface.sign_factor<<"\n";
     o<<"NODES "<<m.nodes.size()<<"\n";
-    o<<"# id ksi eta phi sign constraint parent_edge parent_segment parameter primary\n";
-    for(const auto&n:m.nodes)o<<n.id<<" "<<n.p.x<<" "<<n.p.y<<" "<<n.phi<<" "<<n.sign<<" "<<n.constraint<<" "<<n.parent_edge<<" "<<n.parent_segment<<" "<<n.parameter<<" "<<(n.primary?1:0)<<"\n";
+    o<<"# id ksi eta phi sign owner_phase constraint parent_edge parent_segment parameter primary\n";
+    for(const auto&n:m.nodes)o<<n.id<<" "<<n.p.x<<" "<<n.p.y<<" "<<n.phi<<" "<<n.sign<<" "<<n.owner_phase<<" "<<n.constraint<<" "<<n.parent_edge<<" "<<n.parent_segment<<" "<<n.parameter<<" "<<(n.primary?1:0)<<"\n";
     o<<"PRESSURE_RECORDS "<<m.pressures.size()<<"\n";
     for(const auto&p:m.pressures)o<<p.id<<" "<<p.geom<<" "<<p.phase<<"\n";
     o<<"TRIANGLES "<<m.tris.size()<<"\n";
@@ -1000,10 +1019,13 @@ std::string serialize(const Mesh&m,const Config&cfg,int cid,int tid,std::uint64_
     for(std::size_t i=0;i<m.tris.size();++i){o<<"T "<<i;for(int x:m.tris[i].pressure)o<<" "<<x;o<<"\n";}
     for(std::size_t i=0;i<m.quads.size();++i){o<<"Q "<<i;for(int x:m.quads[i].pressure)o<<" "<<x;o<<"\n";}
     o<<"BOUNDARY_EDGES "<<m.boundary_edges.size()<<"\n";for(const auto&e:m.boundary_edges)o<<e[0]<<" "<<e[1]<<"\n";
-    o<<"INTERFACE_EDGES "<<m.interface_edges.size()<<"\n";for(const auto&e:m.interface_edges)o<<e[0]<<" "<<e[1]<<"\n";
+    o<<"INTERFACE_EDGES_NEGATIVE "<<m.interface_edges[0].size()<<"\n";for(const auto&e:m.interface_edges[0])o<<e[0]<<" "<<e[1]<<"\n";
+    o<<"INTERFACE_EDGES_POSITIVE "<<m.interface_edges[1].size()<<"\n";for(const auto&e:m.interface_edges[1])o<<e[0]<<" "<<e[1]<<"\n";
     o<<"METRICS tri_min "<<m.tri_min<<" tri_mean "<<m.tri_mean<<" quad_min "<<m.quad_min<<" quad_mean "<<m.quad_mean
      <<" quad_count_fraction "<<m.quad_count_fraction<<" quad_area_fraction "<<m.quad_area_fraction
-     <<" phase_negative_area "<<m.phase_area[0]<<" phase_positive_area "<<m.phase_area[1]<<"\n";
+     <<" phase_negative_area "<<m.phase_area[0]<<" phase_positive_area "<<m.phase_area[1]
+     <<" element_count "<<(m.tris.size()+m.quads.size())
+     <<" target_elements "<<cfg.target_elements<<" max_elements "<<cfg.max_elements<<"\n";
     o<<"VALIDATION OK\nEND\n";return o.str();
 }
 void validate_serialized_roundtrip(const std::string&dat,const Mesh&m){
@@ -1017,10 +1039,10 @@ void validate_serialized_roundtrip(const std::string&dat,const Mesh&m){
         if(line.empty()||line[0]=='#')continue;
         if(line.rfind("PRESSURE_RECORDS ",0)==0)break;
         std::istringstream row(line);
-        int id=-1, sign=0, pe=-1, ps=-1, primary=0;
+        int id=-1, sign=0, owner=0, pe=-1, ps=-1, primary=0;
         double x=0,y=0,phi=0,param=0;
         std::string constraint;
-        if(!(row>>id>>x>>y>>phi>>sign>>constraint>>pe>>ps>>param>>primary))
+        if(!(row>>id>>x>>y>>phi>>sign>>owner>>constraint>>pe>>ps>>param>>primary))
             throw std::runtime_error("serialized node parse failed");
         if(id<0||static_cast<std::size_t>(id)>=m.nodes.size())throw std::runtime_error("serialized node id out of range");
         const auto& n=m.nodes[static_cast<std::size_t>(id)];
@@ -1148,6 +1170,8 @@ void validate_config(const Config&c){
     if(!finite(c.phi_zero_tol)||!(c.phi_zero_tol>0))throw std::invalid_argument("phi-zero-tol must be finite and positive");
     if(!finite(c.min_edge_fraction)||!(c.min_edge_fraction>0&&c.min_edge_fraction<0.5))throw std::invalid_argument("min-edge-fraction must lie strictly between 0 and 0.5");
     if(!finite(c.target_edge_length)||!(c.target_edge_length>0))throw std::invalid_argument("target-edge-length must be finite and positive");
+    if(c.target_elements<2)throw std::invalid_argument("target-elements must be at least 2");
+    if(c.max_elements<c.target_elements)throw std::invalid_argument("max-elements must be >= target-elements");
     if(!finite(c.min_triangle_quality)||c.min_triangle_quality<0||c.min_triangle_quality>1)throw std::invalid_argument("min-triangle-quality must be in [0,1]");
     if(!finite(c.min_quad_quality)||c.min_quad_quality<0||c.min_quad_quality>1)throw std::invalid_argument("min-quad-quality must be in [0,1]");
     if(c.max_nodes==0)throw std::invalid_argument("max-nodes must be positive");
