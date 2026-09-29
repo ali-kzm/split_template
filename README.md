@@ -13,24 +13,109 @@ Corner order is counterclockwise: `0=(-1,-1), 1=(1,-1), 2=(1,1), 3=(-1,1)`.
 
 Cases 5 and 8 are intentionally outside this generator. Negative `phi` is the inside phase. `phi` is the signed distance to the supporting line. `phi_zero_tol` is an absolute tolerance in reference-coordinate signed-distance units and is independent of geometric/quality tolerances.
 
-## Dependencies
+## Dependencies and installation
 
-Tested design targets:
+### Libraries used by this project
 
-- C++20 compiler (GCC 12+ or Clang 15+)
-- CMake 3.20+
-- CGAL 5.5+ (GPL/LGPL components; this project uses the triangulation packages)
-- Boost.Graph 1.74+ (Boost Software License 1.0)
-- libjpeg-turbo 2.1+ (BSD-style/IJG/zlib licenses as distributed upstream)
+The project directly uses:
 
-Ubuntu/Debian:
+| Dependency | Purpose | CMake target / lookup |
+| --- | --- | --- |
+| C++20 compiler | Standard language/runtime support | C++20 |
+| CMake 3.20+ | Configure and generate the build | — |
+| CGAL 5.5+ | Robust predicates and constrained Delaunay triangulation | `CGAL::CGAL` |
+| Boost.Graph 1.74+ | Maximum-weight matching for triangle pairing | `Boost::graph` |
+| libjpeg-turbo / libjpeg API | Genuine JPEG preview encoding and decoding in tests | `JPEG::JPEG` |
+
+CGAL also uses **GMP** and **MPFR** transitively. Package managers install these automatically with CGAL, so they normally do not need to be installed separately.
+
+This project does **not** require Qt, Eigen, OpenGL, RheoFEM, MPI, TBB, or OpenCL.
+
+Relevant licenses:
+
+- CGAL: package components are distributed under GPL/LGPL and other compatible component licenses; check the CGAL package/module used by your redistribution.
+- Boost.Graph: Boost Software License 1.0.
+- libjpeg-turbo: BSD-3-Clause and IJG licensing as distributed upstream.
+- GMP: LGPL/GPL dual licensing.
+- MPFR: LGPL.
+
+### Ubuntu / Debian
+
+Ubuntu 22.04/24.04 and recent Debian releases can install everything from the system package manager:
 
 ```sh
 sudo apt update
-sudo apt install -y build-essential cmake ninja-build libcgal-dev libboost-graph-dev libjpeg-dev
+sudo apt install -y \
+  build-essential \
+  cmake \
+  ninja-build \
+  libcgal-dev \
+  libboost-graph-dev \
+  libjpeg-dev
 ```
 
-On Ubuntu, `libjpeg-dev` resolves to the system JPEG development implementation, normally libjpeg-turbo. CMake must find a real JPEG library; the program writes genuine JPEG bitstreams through the libjpeg API.
+`libcgal-dev` installs the required CGAL development files and pulls in GMP/MPFR dependencies. On Ubuntu, `libjpeg-dev` is provided by the system JPEG development implementation, normally libjpeg-turbo.
+
+Configure, build, and test:
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+### Windows
+
+The recommended Windows setup is **Visual Studio 2022 + vcpkg**.
+
+1. Install **Visual Studio 2022** or **Visual Studio 2022 Build Tools** with the **Desktop development with C++** workload. Make sure MSVC, the Windows SDK, and CMake support are enabled.
+
+2. Install Git if it is not already available, then install vcpkg from PowerShell:
+
+```powershell
+git clone https://github.com/microsoft/vcpkg C:\src\vcpkg
+C:\src\vcpkg\bootstrap-vcpkg.bat
+```
+
+3. Install the project libraries:
+
+```powershell
+C:\src\vcpkg\vcpkg.exe install cgal:x64-windows boost-graph:x64-windows libjpeg-turbo:x64-windows
+```
+
+vcpkg installs CGAL's required GMP/MPFR and Boost dependencies automatically.
+
+4. Configure the project using the vcpkg CMake toolchain:
+
+```powershell
+cmake -S . -B build -A x64 ^
+  -DCMAKE_TOOLCHAIN_FILE=C:/src/vcpkg/scripts/buildsystems/vcpkg.cmake
+```
+
+If running the command directly in PowerShell instead of `cmd.exe`, use one line:
+
+```powershell
+cmake -S . -B build -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/src/vcpkg/scripts/buildsystems/vcpkg.cmake
+```
+
+5. Build and run the tests:
+
+```powershell
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The executable is normally produced under:
+
+```text
+build/Release/pvmls-template-generator.exe
+```
+
+On Linux/Ninja builds it is normally:
+
+```text
+build/pvmls-template-generator
+```
 
 ## Build and test
 
