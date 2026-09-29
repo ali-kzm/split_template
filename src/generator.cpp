@@ -335,7 +335,7 @@ bool inside_square(P2 p) {
     return p.x>=-1.0-kGeomTol&&p.x<=1.0+kGeomTol&&p.y>=-1.0-kGeomTol&&p.y<=1.0+kGeomTol;
 }
 
-Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,std::mt19937_64& rng) {
+Mesh triangulate_primary_legacy(const Config& cfg,int cid,const InterfaceGeom& iface,std::mt19937_64& rng) {
     CDT cdt;
     const double h=cfg.target_edge_length;
     // Case 6 can approach a thin strip above edge 0 when the right-edge
@@ -485,6 +485,199 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
     }
     std::sort(iv.begin(),iv.end());
     for(std::size_t i=1;i<iv.size();++i) mesh.interface_edges[0].push_back({iv[i-1].second,iv[i].second});
+    return mesh;
+}
+
+std::vector<P2> clip_phase_polygon(const InterfaceGeom& g,int phase){
+    std::vector<P2> poly(corners.begin(),corners.end()),out;
+    auto signed_value=[&](P2 p){return phase<0?phi_raw(g,p):-phi_raw(g,p);};
+    for(std::size_t i=0;i<poly.size();++i){
+        const P2 a=poly[i],b=poly[(i+1)%poly.size()];
+        const double fa=signed_value(a),fb=signed_value(b);
+        const bool ia=fa<=kGeomTol,ib=fb<=kGeomTol;
+        if(ia)out.push_back(a);
+        if(ia!=ib){
+            const double t=fa/(fa-fb);
+            out.push_back({a.x+t*(b.x-a.x),a.y+t*(b.y-a.y)});
+        }
+    }
+    if(out.size()>=3 && area_poly(out)<0.0)std::reverse(out.begin(),out.end());
+    return out;
+}
+
+bool inside_convex_polygon(const std::vector<P2>& poly,P2 p){
+    if(poly.size()<3)return false;
+    for(std::size_t i=0;i<poly.size();++i)
+        if(cross(poly[i],poly[(i+1)%poly.size()],p)<-5e-11)return false;
+    return true;
+}
+
+double point_segment_distance(P2 p,P2 a,P2 b){
+    const double dx=b.x-a.x,dy=b.y-a.y;
+    const double d2=dx*dx+dy*dy;
+    if(!(d2>0.0))return std::sqrt(dist2(p,a));
+    const double t=std::clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/d2,0.0,1.0);
+    return std::hypot(p.x-(a.x+t*dx),p.y-(a.y+t*dy));
+}
+
+double min_polygon_edge_distance(const std::vector<P2>& poly,P2 p){
+    double d=std::numeric_limits<double>::infinity();
+    for(std::size_t i=0;i<poly.size();++i)
+        d=std::min(d,point_segment_distance(p,poly[i],poly[(i+1)%poly.size()]));
+    return d;
+}
+
+int finite_face_count(const CDT& cdt){
+    int n=0;
+    for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f)++n;
+    return n;
+}
+
+void append_phase_triangulation(Mesh& mesh,const Config& cfg,const InterfaceGeom& iface,
+                                int phase,int target_cells,int max_cells,int interface_segments,
+                                std::mt19937_64& rng){
+    auto poly=clip_phase_polygon(iface,phase);
+    if(poly.size()<3)throw std::runtime_error("empty phase polygon");
+    const double area=std::abs(area_poly(poly));
+    if(!(area>kGeomTol))throw std::runtime_error("degenerate phase polygon");
+
+    CDT cdt;
+    struct Chain{std::vector<VH> v;bool interface_edge{false};int square_edge{-1};};
+    std::vector<Chain> chains;
+    int boundary_vertex_estimate=0;
+
+    for(std::size_t i=0;i<poly.size();++i){
+        const P2 a=poly[i],b=poly[(i+1)%poly.size()];
+        const bool on_interface=std::abs(phi_raw(iface,a))<=1e-9 && std::abs(phi_raw(iface,b))<=1e-9;
+        const P2 mid{0.5*(a.x+b.x),0.5*(a.y+b.y)};
+        const int be=on_interface?-1:boundary_edge(mid);
+        int segments=1;
+        if(on_interface)segments=std::max(1,interface_segments);
+        else if(std::sqrt(dist2(a,b))>1.65 && target_cells>=6)segments=2;
+
+        Chain chain;chain.interface_edge=on_interface;chain.square_edge=be;
+        for(int k=0;k<=segments;++k){
+            const double t=static_cast<double>(k)/segments;
+            P2 p{a.x+t*(b.x-a.x),a.y+t*(b.y-a.y)};
+            chain.v.push_back(cdt.insert(Point(p.x,p.y)));
+        }
+        add_constraint_chain(cdt,chain.v);
+        boundary_vertex_estimate+=segments;
+        chains.push_back(std::move(chain));
+    }
+
+    const int base_triangles=std::max(1,boundary_vertex_estimate-2);
+    const int base_cells=(base_triangles+1)/2;
+    int requested_interior=std::max(0,target_cells-base_cells);
+    requested_interior=std::min(requested_interior,std::max(0,max_cells-base_cells));
+
+    double xmin=1e9,xmax=-1e9,ymin=1e9,ymax=-1e9;
+    for(P2 p:poly){xmin=std::min(xmin,p.x);xmax=std::max(xmax,p.x);ymin=std::min(ymin,p.y);ymax=std::max(ymax,p.y);}
+    std::uniform_real_distribution<double> ux(xmin,xmax),uy(ymin,ymax);
+    const double spacing=0.10*std::sqrt(area/std::max(1,target_cells));
+    for(int ip=0;ip<requested_interior;++ip){
+        bool inserted=false;
+        for(int trial=0;trial<600&&!inserted;++trial){
+            P2 p{ux(rng),uy(rng)};
+            if(!inside_convex_polygon(poly,p))continue;
+            const double need=trial<400?spacing:0.25*spacing;
+            if(min_polygon_edge_distance(poly,p)<need)continue;
+            cdt.insert(Point(p.x,p.y));inserted=true;
+        }
+        if(!inserted)break;
+    }
+
+    // Add only as many Steiner points as needed for quality, and never allow
+    // the phase to grow beyond its share of the configured max-element budget.
+    for(int refine=0;refine<12;++refine){
+        double worst=1.0;
+        std::optional<P2> candidate;
+        for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f){
+            P2 a{CGAL::to_double(f->vertex(0)->point().x()),CGAL::to_double(f->vertex(0)->point().y())};
+            P2 b{CGAL::to_double(f->vertex(1)->point().x()),CGAL::to_double(f->vertex(1)->point().y())};
+            P2 c{CGAL::to_double(f->vertex(2)->point().x()),CGAL::to_double(f->vertex(2)->point().y())};
+            P2 cen{(a.x+b.x+c.x)/3.0,(a.y+b.y+c.y)/3.0};
+            if(!inside_convex_polygon(poly,cen))continue;
+            if(cross(a,b,c)<0)std::swap(b,c);
+            const double q=triangle_quality(a,b,c);
+            if(q<worst){worst=q;candidate=cen;}
+        }
+        if(worst+1e-12>=cfg.min_triangle_quality || !candidate)break;
+        if((finite_face_count(cdt)+2+1)/2>max_cells)break;
+        if(min_polygon_edge_distance(poly,*candidate)<1e-8)break;
+        cdt.insert(Point(candidate->x,candidate->y));
+    }
+
+    std::map<const void*,int> ids;
+    auto idof=[&](VH vh)->int{
+        const void* key=static_cast<const void*>(&*vh);
+        auto it=ids.find(key);if(it!=ids.end())return it->second;
+        P2 p{CGAL::to_double(vh->point().x()),CGAL::to_double(vh->point().y())};
+        Node n=make_node(p,iface,cfg,true);
+        n.id=static_cast<int>(mesh.nodes.size());
+        n.owner_phase=phase;
+        if(n.constraint=="interface")n.parent_segment=phase<0?0:1;
+        mesh.nodes.push_back(n);
+        ids[key]=n.id;
+        return n.id;
+    };
+
+    for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f){
+        P2 p[3];
+        for(int k=0;k<3;++k)p[k]={CGAL::to_double(f->vertex(k)->point().x()),CGAL::to_double(f->vertex(k)->point().y())};
+        P2 cen{(p[0].x+p[1].x+p[2].x)/3.0,(p[0].y+p[1].y+p[2].y)/3.0};
+        if(!inside_convex_polygon(poly,cen))continue;
+        const int cs=classify_phi(phi_raw(iface,cen),cfg.phi_zero_tol);
+        if(cs!=phase && cs!=0)continue;
+        Tri t;t.phase=phase;
+        for(int k=0;k<3;++k)t.v[static_cast<std::size_t>(k)]=idof(f->vertex(k));
+        if(cross(mesh.nodes[t.v[0]].p,mesh.nodes[t.v[1]].p,mesh.nodes[t.v[2]].p)<0)std::swap(t.v[1],t.v[2]);
+        t.quality=triangle_quality(mesh.nodes[t.v[0]].p,mesh.nodes[t.v[1]].p,mesh.nodes[t.v[2]].p);
+        mesh.tris.push_back(t);
+    }
+
+    const std::size_t side=phase<0?0U:1U;
+    for(const auto& chain:chains){
+        for(std::size_t i=1;i<chain.v.size();++i){
+            const std::array<int,2> e{idof(chain.v[i-1]),idof(chain.v[i])};
+            if(chain.interface_edge)mesh.interface_edges[side].push_back(e);
+            else if(chain.square_edge>=0)mesh.boundary_edges.push_back(e);
+        }
+    }
+}
+
+Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,std::mt19937_64& rng){
+    Mesh mesh;mesh.iface=iface;
+    const auto neg_poly=clip_phase_polygon(iface,-1);
+    const auto pos_poly=clip_phase_polygon(iface,1);
+    const double an=std::abs(area_poly(neg_poly)),ap=std::abs(area_poly(pos_poly));
+    if(!(an>kGeomTol&&ap>kGeomTol))throw std::runtime_error("degenerate phase area");
+
+    const double wn=std::sqrt(an),wp=std::sqrt(ap);
+    const int min_each=cfg.target_elements>=8?3:1;
+    int target_neg=static_cast<int>(std::lround(cfg.target_elements*wn/(wn+wp)));
+    target_neg=std::clamp(target_neg,min_each,cfg.target_elements-min_each);
+    const int target_pos=cfg.target_elements-target_neg;
+
+    const int extra=cfg.max_elements-cfg.target_elements;
+    int extra_neg=extra>0?static_cast<int>(std::lround(extra*wn/(wn+wp))):0;
+    extra_neg=std::clamp(extra_neg,0,std::max(0,extra));
+    const int max_neg=target_neg+extra_neg;
+    const int max_pos=target_pos+(extra-extra_neg);
+
+    int seg_neg=std::clamp(1+(target_neg+1)/2,1,5);
+    int seg_pos=std::clamp(1+(target_pos+1)/2,1,5);
+    if(seg_neg==seg_pos){
+        if(target_pos>=target_neg && seg_pos<5)++seg_pos;
+        else if(seg_neg<5)++seg_neg;
+        else --seg_pos;
+    }
+
+    append_phase_triangulation(mesh,cfg,iface,-1,target_neg,max_neg,seg_neg,rng);
+    append_phase_triangulation(mesh,cfg,iface, 1,target_pos,max_pos,seg_pos,rng);
+
+    if(mesh.nodes.size()>cfg.max_nodes)throw std::runtime_error("primary node count exceeds max-nodes");
+    if(mesh.tris.empty())throw std::runtime_error("empty independent phase triangulation");
     return mesh;
 }
 
