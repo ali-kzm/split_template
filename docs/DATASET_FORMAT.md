@@ -20,7 +20,7 @@ The text file is line-oriented and human readable. Floating-point values are ser
 - `BOUNDARY_EDGES`: ordered primary-mesh square-boundary segments
 - `INTERFACE_EDGES_NEGATIVE`: ordered negative-side primary interface segments
 - `INTERFACE_EDGES_POSITIVE`: ordered positive-side primary interface segments
-- `METRICS`: min/mean triangle and quad quality, quad count fraction, quad area fraction, per-phase areas
+- `METRICS`: min/mean triangle and quad quality, quad count fraction, quad area fraction, per-phase areas, total primary element count, negative/positive element counts, target element count, and hard maximum
 - `VALIDATION OK`
 - `END`
 
