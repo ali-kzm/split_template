@@ -958,7 +958,11 @@ bool cell_crosses_interface(const Mesh&m,const std::vector<int>&v,int phase,cons
 void validate_mesh(Mesh&m,const Config&cfg,int cid){
     if(m.nodes.empty())throw std::runtime_error("no nodes");
     const int primary_cells=static_cast<int>(m.tris.size()+m.quads.size());
-    if(primary_cells>cfg.max_elements)throw std::runtime_error("primary element count exceeds max-elements");
+    if(primary_cells>cfg.max_elements){
+        std::ostringstream msg;msg<<"primary element count exceeds max-elements: count="<<primary_cells
+                                  <<" max="<<cfg.max_elements<<" interface_t="<<m.iface.pb;
+        throw std::runtime_error(msg.str());
+    }
     const auto want=expected_signs(cid);
     for(int i=0;i<4;++i){
         const double ph=phi_raw(m.iface,corners[static_cast<std::size_t>(i)]);
