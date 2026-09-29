@@ -305,7 +305,7 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
     double thin_h=h;
     if(cid==6){
         const double thickness=2.0*std::clamp(iface.pb,0.0,1.0);
-        if(thickness>0.0)thin_h=std::min(h,20.0*thickness);
+        if(thickness>0.0)thin_h=std::min(h,30.0*thickness);
     }
     std::array<std::set<double>,4> bt;
     for(int e=0;e<4;++e){
@@ -370,7 +370,8 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
     }
     add_constraint_chain(cdt,ichain);
 
-    const int nx=std::max(2,static_cast<int>(std::ceil(2.0/h)));
+    int nx=std::max(2,static_cast<int>(std::ceil(2.0/h)));
+    if(cid==6 && thin_h<h)nx=std::min(nx,5);
     const double step=2.0/nx;
     std::uniform_real_distribution<double> jitter(-0.22,0.22);
     for (int j=1;j<nx;++j) for (int i=1;i<nx;++i) {
