@@ -329,7 +329,8 @@ Node make_node(P2 p,const InterfaceGeom& g,const Config& cfg,bool primary=true) 
 std::array<int,2> edge_key(int a,int b) { return a<b?std::array<int,2>{a,b}:std::array<int,2>{b,a}; }
 
 void add_constraint_chain(CDT& cdt,const std::vector<VH>& chain) {
-    for (std::size_t i=1;i<chain.size();++i) cdt.insert_constraint(chain[i-1],chain[i]);
+    for (std::size_t i=1;i<chain.size();++i)
+        if(chain[i-1]!=chain[i])cdt.insert_constraint(chain[i-1],chain[i]);
 }
 std::vector<P2> sample_segment(P2 a,P2 b,double h,bool include_ends=true) {
     const int n=std::max(1,static_cast<int>(std::ceil(std::sqrt(dist2(a,b))/h)));
@@ -511,8 +512,14 @@ std::vector<P2> clip_phase_polygon(const InterfaceGeom& g,int phase){
             out.push_back({a.x+t*(b.x-a.x),a.y+t*(b.y-a.y)});
         }
     }
-    if(out.size()>=3 && area_poly(out)<0.0)std::reverse(out.begin(),out.end());
-    return out;
+    std::vector<P2> clean;
+    clean.reserve(out.size());
+    for(P2 p:out){
+        if(clean.empty()||dist2(clean.back(),p)>1e-24)clean.push_back(p);
+    }
+    if(clean.size()>1&&dist2(clean.front(),clean.back())<=1e-24)clean.pop_back();
+    if(clean.size()>=3 && area_poly(clean)<0.0)std::reverse(clean.begin(),clean.end());
+    return clean;
 }
 
 bool inside_convex_polygon(const std::vector<P2>& poly,P2 p){
