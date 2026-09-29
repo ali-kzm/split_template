@@ -231,8 +231,18 @@ InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std
     if (cid==2) {
         const auto perm=stratum_permutation(cfg.templates_per_case,cfg.seed,2);
         const int j=perm[static_cast<std::size_t>(tid)];
-        const double t0=stratified(tid,cfg.templates_per_case,lo,hi,rng,1);
-        const double t3=stratified(j,cfg.templates_per_case,lo,hi,rng,2);
+        double t0=stratified(tid,cfg.templates_per_case,lo,hi,rng,1);
+        double t3=stratified(j,cfg.templates_per_case,lo,hi,rng,2);
+        if(attempt>0){
+            const double inset=0.5*(hi-lo)/static_cast<double>(cfg.templates_per_case);
+            auto retry_inset=[&](double t){
+                if(t<=lo+1e-15)return std::min(hi,lo+inset);
+                if(t>=hi-1e-15)return std::max(lo,hi-inset);
+                return t;
+            };
+            t0=retry_inset(t0);
+            t3=retry_inset(t3);
+        }
         g={edge_point(0,t0),edge_point(3,t3),t0,t3,0,3,1.0};
     } else if (cid==3) {
         const auto perm=stratum_permutation(cfg.templates_per_case,cfg.seed,3);
