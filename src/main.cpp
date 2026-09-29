@@ -20,7 +20,9 @@ void usage() {
         << "  --seed <integer>                  default 24301\n"
         << "  --phi-zero-tol <real>             default 1e-10\n"
         << "  --min-edge-fraction <real>        default 1e-3\n"
-        << "  --target-edge-length <real>       default 0.3\n"
+        << "  --target-edge-length <real>       legacy spacing hint, default 0.3\n"
+        << "  --target-elements <N>             desired primary cells, default 10\n"
+        << "  --max-elements <N>                hard primary-cell cap, default 20\n"
         << "  --min-triangle-quality <real>     default 0.05\n"
         << "  --min-quad-quality <real>         default 0.2\n"
         << "  --max-nodes <N>                   default 512\n"
@@ -72,6 +74,8 @@ int main(int argc, char** argv) {
             else if (arg == "--phi-zero-tol") cfg.phi_zero_tol = parse_number<double>(need(arg.c_str()));
             else if (arg == "--min-edge-fraction") cfg.min_edge_fraction = parse_number<double>(need(arg.c_str()));
             else if (arg == "--target-edge-length") cfg.target_edge_length = parse_number<double>(need(arg.c_str()));
+            else if (arg == "--target-elements") cfg.target_elements = parse_number<int>(need(arg.c_str()));
+            else if (arg == "--max-elements") cfg.max_elements = parse_number<int>(need(arg.c_str()));
             else if (arg == "--min-triangle-quality") cfg.min_triangle_quality = parse_number<double>(need(arg.c_str()));
             else if (arg == "--min-quad-quality") cfg.min_quad_quality = parse_number<double>(need(arg.c_str()));
             else if (arg == "--max-nodes") cfg.max_nodes = parse_number<std::size_t>(need(arg.c_str()));
