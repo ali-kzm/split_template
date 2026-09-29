@@ -1,0 +1,35 @@
+name: build-test-generate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ libcgal-dev libboost-graph-dev libjpeg-dev
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+      - name: Generate sample dataset
+        run: |
+          ./build/pvmls-template-generator \
+            --output ./sample_dataset \
+            --templates-per-case 15 \
+            --cases 2,3,6,11 \
+            --seed 24301
+      - name: Upload sample dataset
+        uses: actions/upload-artifact@v4
+        with:
+          name: pvmls-sample-dataset
+          path: sample_dataset

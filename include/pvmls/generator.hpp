@@ -12,7 +12,7 @@ struct Config {
     std::filesystem::path output{"./pvmls_templates"};
     int templates_per_case{15};
     std::vector<int> cases{2, 3, 6, 11};
-    std::uint64_t seed{24301ULL};
+    std::uint64_t seed{0x5EEDULL};
     double phi_zero_tol{1e-10};
     double min_edge_fraction{1e-3};
     double target_edge_length{0.3};
