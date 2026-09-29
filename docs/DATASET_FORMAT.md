@@ -11,7 +11,7 @@ The text file is line-oriented and human readable. Floating-point values are ser
 - `PVMLS_TEMPLATE_DATA 1.0.0`
 - `META`: case, template index, seed and complete generation settings
 - `CORNERS`: canonical corner ID, coordinates, raw signed-distance phi and classified sign
-- `INTERFACE`: endpoints, supporting-line data and edge sampling parameters
+- `INTERFACE`: endpoints, explicit prescribed endpoint `phi=0`, supporting-line data and edge sampling parameters
 - `NODES`: shared geometric nodes, including enriched nodes
 - `PRESSURE_RECORDS`: local pressure ID -> geometric node ID + phase
 - `TRIANGLES`: phase, quality, P1 vertex connectivity, P2 connectivity
