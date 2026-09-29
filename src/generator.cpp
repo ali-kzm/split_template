@@ -282,7 +282,11 @@ InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std
                 if(wedge_quality(mid)<cfg.min_triangle_quality)a=mid;else b=mid;
             }
             const double safe=std::min(hi,b*1.15+1e-6);
-            t1=std::max(t1,safe);
+            const double retry_margin=std::min(0.20,0.06+0.02*std::min(attempt,7));
+            const double lower=std::max(safe,retry_margin);
+            const double upper=std::min(hi,1.0-retry_margin);
+            if(lower>=upper)throw std::runtime_error("case 6 has no quality-admissible retry interval");
+            t1=std::clamp(t1,lower,upper);
         }
         g={corners[0],edge_point(1,t1),0.0,t1,0,1,1.0};
     } else if (cid==11) {
