@@ -798,6 +798,7 @@ double local_min_quality(const Mesh& m,int nid) {
     }
     for(const auto& e:m.quads)if(std::find(e.v.begin(),e.v.end(),nid)!=e.v.end()){
         std::array<P2,4> p{m.nodes[e.v[0]].p,m.nodes[e.v[1]].p,m.nodes[e.v[2]].p,m.nodes[e.v[3]].p};
+        if(!convex_quad(m,e.v))return -1.0;
         q=std::min(q,quad_quality(p));any=true;
     }
     return any?q:1.0;
