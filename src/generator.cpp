@@ -212,7 +212,8 @@ InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std
         g={edge_point(0,t0),edge_point(3,t3),t0,t3,0,3,1.0};
     } else if (cid==3) {
         const double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,3);
-        const double t3=1.0-stratified(tid,cfg.templates_per_case,lo,hi,rng,4);
+        const int shifted=(tid+std::max(1,cfg.templates_per_case/2))%cfg.templates_per_case;
+        const double t3=stratified(shifted,cfg.templates_per_case,lo,hi,rng,4);
         g={edge_point(1,t1),edge_point(3,t3),t1,t3,1,3,1.0};
     } else if (cid==6) {
         double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,5);
