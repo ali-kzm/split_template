@@ -983,7 +983,10 @@ void validate_mesh(Mesh&m,const Config&cfg,int cid){
         const double q=triangle_quality(m.nodes[t.v[0]].p,m.nodes[t.v[1]].p,m.nodes[t.v[2]].p);
         if(q+1e-12<cfg.min_triangle_quality){
             std::ostringstream msg;msg<<"triangle quality threshold violated: q="<<q<<" phase="<<t.phase
-                                      <<" threshold="<<cfg.min_triangle_quality;
+                                      <<" threshold="<<cfg.min_triangle_quality
+                                      <<" v0=("<<m.nodes[t.v[0]].p.x<<","<<m.nodes[t.v[0]].p.y<<")"
+                                      <<" v1=("<<m.nodes[t.v[1]].p.x<<","<<m.nodes[t.v[1]].p.y<<")"
+                                      <<" v2=("<<m.nodes[t.v[2]].p.x<<","<<m.nodes[t.v[2]].p.y<<")";
             throw std::runtime_error(msg.str());
         }
         std::vector<int> vv(t.v.begin(),t.v.end()); if(cell_crosses_interface(m,vv,t.phase,cfg))throw std::runtime_error("triangle crosses interface");
