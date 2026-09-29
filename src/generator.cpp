@@ -182,7 +182,7 @@ double quad_quality(const std::array<P2,4>& p) {
     return q;
 }
 double quad_area(const std::array<P2,4>& p) {
-    return std::abs(area_poly({p.begin(),p.end()}));
+    return std::abs(area_poly(std::vector<P2>(p.begin(),p.end())));
 }
 std::uint64_t mix_seed(std::uint64_t s, int cid, int tid, int attempt) {
     auto mix=[](std::uint64_t x){
@@ -358,7 +358,7 @@ std::array<int,4> quad_from_pair(const Mesh& m,const Tri& a,const Tri& b) {
     });
     std::array<int,4> q{ids[0],ids[1],ids[2],ids[3]};
     std::array<P2,4> p{m.nodes[q[0]].p,m.nodes[q[1]].p,m.nodes[q[2]].p,m.nodes[q[3]].p};
-    if(area_poly({p.begin(),p.end()})<0){std::reverse(q.begin(),q.end());}
+    if(area_poly(std::vector<P2>(p.begin(),p.end()))<0){std::reverse(q.begin(),q.end());}
     return q;
 }
 bool convex_quad(const Mesh& m,const std::array<int,4>& q) {
