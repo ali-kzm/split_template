@@ -1013,6 +1013,9 @@ void validate_mesh(Mesh&m,const Config&cfg,int cid){
 }
 std::string serialize(const Mesh&m,const Config&cfg,int cid,int tid,std::uint64_t seed){
     std::ostringstream o;o<<std::setprecision(17);
+    int negative_elements=0,positive_elements=0;
+    for(const auto&t:m.tris)(t.phase<0?negative_elements:positive_elements)++;
+    for(const auto&q:m.quads)(q.phase<0?negative_elements:positive_elements)++;
     o<<"PVMLS_TEMPLATE_DATA "<<kSchemaVersion<<"\n";
     o<<"META\nCASE "<<cid<<"\nTEMPLATE "<<tid<<"\nSEED "<<seed<<"\n";
     o<<"CONFIG phi_zero_tol "<<cfg.phi_zero_tol<<" min_edge_fraction "<<cfg.min_edge_fraction
@@ -1046,6 +1049,7 @@ std::string serialize(const Mesh&m,const Config&cfg,int cid,int tid,std::uint64_
      <<" quad_count_fraction "<<m.quad_count_fraction<<" quad_area_fraction "<<m.quad_area_fraction
      <<" phase_negative_area "<<m.phase_area[0]<<" phase_positive_area "<<m.phase_area[1]
      <<" element_count "<<(m.tris.size()+m.quads.size())
+     <<" negative_elements "<<negative_elements<<" positive_elements "<<positive_elements
      <<" target_elements "<<cfg.target_elements<<" max_elements "<<cfg.max_elements<<"\n";
     o<<"VALIDATION OK\nEND\n";return o.str();
 }
