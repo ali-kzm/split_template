@@ -682,8 +682,8 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
     const int max_neg=target_neg+extra_neg;
     const int max_pos=target_pos+(extra-extra_neg);
 
-    int seg_neg=std::clamp(1+(target_neg+1)/2,1,5);
-    int seg_pos=std::clamp(1+(target_pos+1)/2,1,5);
+    int seg_neg=std::clamp((target_neg+1)/2,1,4);
+    int seg_pos=std::clamp((target_pos+1)/2,1,4);
     if(seg_neg==seg_pos){
         if(target_pos>=target_neg && seg_pos<5)++seg_pos;
         else if(seg_neg<5)++seg_neg;
