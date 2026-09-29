@@ -5,6 +5,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(PVMLS_ENABLE_ASAN "Enable AddressSanitizer for debugging/tests" OFF)
+if(PVMLS_ENABLE_ASAN AND NOT MSVC)
+  add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address)
+endif()
+
 find_package(CGAL REQUIRED)
 find_package(Boost REQUIRED COMPONENTS graph)
 find_package(JPEG REQUIRED)
