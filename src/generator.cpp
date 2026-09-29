@@ -212,8 +212,8 @@ std::vector<int> stratum_permutation(int n,std::uint64_t seed,int cid){
     auto mirror_collision=[&](){
         if(cid!=3)return false;
         for(int i=0;i<n;++i)for(int k=i+1;k<n;++k){
-            if(p[static_cast<std::size_t>(i)]==n-1-k &&
-               p[static_cast<std::size_t>(k)]==n-1-i)return true;
+            if(i+k==n-1 &&
+               p[static_cast<std::size_t>(i)]+p[static_cast<std::size_t>(k)]==n-1)return true;
         }
         return false;
     };
