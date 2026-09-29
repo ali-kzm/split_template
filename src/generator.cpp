@@ -591,17 +591,21 @@ void append_phase_triangulation(Mesh& mesh,const Config& cfg,const InterfaceGeom
     double xmin=1e9,xmax=-1e9,ymin=1e9,ymax=-1e9;
     for(P2 p:poly){xmin=std::min(xmin,p.x);xmax=std::max(xmax,p.x);ymin=std::min(ymin,p.y);ymax=std::max(ymax,p.y);}
     std::uniform_real_distribution<double> ux(xmin,xmax),uy(ymin,ymax);
-    const double spacing=0.10*std::sqrt(area/std::max(1,target_cells));
+    std::vector<P2> interior_points;
+    interior_points.reserve(static_cast<std::size_t>(requested_interior));
     for(int ip=0;ip<requested_interior;++ip){
-        bool inserted=false;
-        for(int trial=0;trial<600&&!inserted;++trial){
+        std::optional<P2> best;
+        double best_score=-1.0;
+        for(int trial=0;trial<500;++trial){
             P2 p{ux(rng),uy(rng)};
             if(!inside_convex_polygon(poly,p))continue;
-            const double need=trial<400?spacing:0.25*spacing;
-            if(min_polygon_edge_distance(poly,p)<need)continue;
-            cdt.insert(Point(p.x,p.y));inserted=true;
+            double score=min_polygon_edge_distance(poly,p);
+            for(P2 q:interior_points)score=std::min(score,0.75*std::sqrt(dist2(p,q)));
+            if(score>best_score){best_score=score;best=p;}
         }
-        if(!inserted)break;
+        if(!best||best_score<=1e-9)break;
+        cdt.insert(Point(best->x,best->y));
+        interior_points.push_back(*best);
     }
 
     // Add only as many Steiner points as needed for quality, and never allow
