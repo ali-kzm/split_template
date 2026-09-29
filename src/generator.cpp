@@ -212,7 +212,7 @@ InterfaceGeom sample_interface(const Config& cfg,int cid,int tid,int attempt,std
         g={edge_point(0,t0),edge_point(3,t3),t0,t3,0,3,1.0};
     } else if (cid==3) {
         const double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,3);
-        const double t3=stratified((tid*5+1)%cfg.templates_per_case,cfg.templates_per_case,lo,hi,rng,4);
+        const double t3=1.0-stratified(tid,cfg.templates_per_case,lo,hi,rng,4);
         g={edge_point(1,t1),edge_point(3,t3),t1,t3,1,3,1.0};
     } else if (cid==6) {
         const double t1=stratified(tid,cfg.templates_per_case,lo,hi,rng,5);
@@ -868,7 +868,12 @@ void publish_pair(const fs::path&dir,const std::string&stem,const std::string&da
         {std::ofstream o(dat_tmp,std::ios::binary);if(!o)throw std::runtime_error("cannot open temporary dataset");o<<dat;if(!o)throw std::runtime_error("dataset write failed");}
         write_jpeg(jpg_tmp,m,cid,tid,image_size);
         fs::rename(dat_tmp,dat_final);fs::rename(jpg_tmp,jpg_final);
-    }catch(...){std::error_code ec;fs::remove(dat_tmp,ec);fs::remove(jpg_tmp,ec);throw;}
+    }catch(...){
+        std::error_code ec;
+        fs::remove(dat_tmp,ec);fs::remove(jpg_tmp,ec);
+        fs::remove(dat_final,ec);fs::remove(jpg_final,ec);
+        throw;
+    }
 }
 std::string manifest_json(const Config&cfg,const GenerationSummary&s,const std::vector<std::tuple<int,int,std::string>>&accepted){
     std::ostringstream o;o<<"{\n  \"schema_version\": \""<<kSchemaVersion<<"\",\n  \"seed\": "<<cfg.seed<<",\n  \"requested\": "<<s.requested<<",\n  \"accepted\": "<<s.accepted<<",\n  \"failed\": "<<s.failed<<",\n  \"templates\": [\n";
