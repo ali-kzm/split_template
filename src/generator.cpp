@@ -305,6 +305,28 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
         cdt.insert(Point(x,y));
     }
 
+    // Bounded quality refinement. Poor finite triangles receive a centroid
+    // insertion when that point is safely away from the interface/boundary.
+    const std::size_t primary_budget=std::max<std::size_t>(4,cfg.max_nodes/3);
+    for(int refine=0;refine<64 && cdt.number_of_vertices()<primary_budget;++refine){
+        double worst=1.0;
+        std::optional<P2> candidate;
+        for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f){
+            P2 a{CGAL::to_double(f->vertex(0)->point().x()),CGAL::to_double(f->vertex(0)->point().y())};
+            P2 b{CGAL::to_double(f->vertex(1)->point().x()),CGAL::to_double(f->vertex(1)->point().y())};
+            P2 c{CGAL::to_double(f->vertex(2)->point().x()),CGAL::to_double(f->vertex(2)->point().y())};
+            if(cross(a,b,c)<=0)std::swap(b,c);
+            const double q=triangle_quality(a,b,c);
+            if(q>=cfg.min_triangle_quality*1.05 || q>=worst)continue;
+            P2 p{(a.x+b.x+c.x)/3.0,(a.y+b.y+c.y)/3.0};
+            if(p.x<=-1.0+1e-8||p.x>=1.0-1e-8||p.y<=-1.0+1e-8||p.y>=1.0-1e-8)continue;
+            if(std::abs(phi_raw(iface,p))<0.08*step)continue;
+            worst=q;candidate=p;
+        }
+        if(!candidate)break;
+        cdt.insert(Point(candidate->x,candidate->y));
+    }
+
     Mesh mesh; mesh.iface=iface;
     std::map<const void*,int> ids;
     auto idof=[&](VH vh)->int{
@@ -672,6 +694,32 @@ std::string serialize(const Mesh&m,const Config&cfg,int cid,int tid,std::uint64_
      <<" phase_negative_area "<<m.phase_area[0]<<" phase_positive_area "<<m.phase_area[1]<<"\n";
     o<<"VALIDATION OK\nEND\n";return o.str();
 }
+void validate_serialized_roundtrip(const std::string&dat,const Mesh&m){
+    std::istringstream in(dat);
+    std::string line;
+    std::size_t count=0;
+    bool nodes=false;
+    while(std::getline(in,line)){
+        if(line.rfind("NODES ",0)==0){nodes=true;continue;}
+        if(!nodes)continue;
+        if(line.empty()||line[0]=='#')continue;
+        if(line.rfind("PRESSURE_RECORDS ",0)==0)break;
+        std::istringstream row(line);
+        int id=-1, sign=0, pe=-1, ps=-1, primary=0;
+        double x=0,y=0,phi=0,param=0;
+        std::string constraint;
+        if(!(row>>id>>x>>y>>phi>>sign>>constraint>>pe>>ps>>param>>primary))
+            throw std::runtime_error("serialized node parse failed");
+        if(id<0||static_cast<std::size_t>(id)>=m.nodes.size())throw std::runtime_error("serialized node id out of range");
+        const auto& n=m.nodes[static_cast<std::size_t>(id)];
+        if(std::bit_cast<std::uint64_t>(x)!=std::bit_cast<std::uint64_t>(n.p.x) ||
+           std::bit_cast<std::uint64_t>(y)!=std::bit_cast<std::uint64_t>(n.p.y) ||
+           std::bit_cast<std::uint64_t>(phi)!=std::bit_cast<std::uint64_t>(n.phi))
+            throw std::runtime_error("serialized floating-point round trip failed");
+        ++count;
+    }
+    if(count!=m.nodes.size())throw std::runtime_error("serialized node count mismatch");
+}
 std::string signature_of(const Mesh&m){
     std::ostringstream o;o<<std::setprecision(14);
     o<<m.iface.a.x<<","<<m.iface.a.y<<","<<m.iface.b.x<<","<<m.iface.b.y<<";";
@@ -695,7 +743,7 @@ Candidate build_candidate(const Config&cfg,int cid,int tid,int attempt){
 // Tiny 5x7 glyph set used only for preview identifiers/legend.
 std::array<unsigned char,7> glyph(char c){
     switch(c){
-    case 'A':return{14,17,17,31,17,17,17}; case 'C':return{14,17,16,16,16,17,14};
+    case 'A':return{14,17,17,31,17,17,17}; case 'B':return{30,17,17,30,17,17,30}; case 'C':return{14,17,16,16,16,17,14};
     case 'E':return{31,16,16,30,16,16,31}; case 'G':return{14,17,16,23,17,17,15};
     case 'I':return{31,4,4,4,4,4,31}; case 'L':return{16,16,16,16,16,16,31};
     case 'N':return{17,25,21,19,17,17,17}; case 'P':return{30,17,17,30,16,16,16};
@@ -793,7 +841,8 @@ void validate_config(const Config&c){
 GenerationSummary generate_dataset(const Config&cfg){
     validate_config(cfg);GenerationSummary s;s.requested=cfg.templates_per_case*static_cast<int>(cfg.cases.size());
     if(fs::exists(cfg.output)&&!cfg.overwrite){
-        bool nonempty=fs::directory_iterator(cfg.output)!=fs::directory_iterator{};
+        if(!fs::is_directory(cfg.output))throw std::runtime_error("output path exists and is not a directory");
+        const bool nonempty=fs::directory_iterator(cfg.output)!=fs::directory_iterator{};
         if(nonempty)throw std::runtime_error("output directory is not empty; pass --overwrite to replace generated content");
     }
     if(cfg.overwrite&&fs::exists(cfg.output))fs::remove_all(cfg.output);
@@ -810,6 +859,7 @@ GenerationSummary generate_dataset(const Config&cfg){
                     if(!signatures.insert(c.signature).second)throw std::runtime_error("duplicate geometry/connectivity dataset");
                     const int out_index=ti+1;std::ostringstream stem;stem<<"temp_"<<std::setw(2)<<std::setfill('0')<<out_index;
                     const auto dat=serialize(c.mesh,cfg,cid,out_index,cfg.seed);
+                    validate_serialized_roundtrip(dat,c.mesh);
                     publish_pair(dir,stem.str(),dat,c.mesh,cid,out_index,cfg.image_size);
                     accepted.emplace_back(cid,out_index,(fs::path("case_"+std::to_string(cid))/(stem.str()+".dat")).generic_string());
                     ++s.accepted;ok=true;
