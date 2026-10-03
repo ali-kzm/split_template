@@ -754,9 +754,32 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
         if(score<best.score)best={i,score};
     }
 
-    // A clean pentagon can often be represented by one good triangle plus one
-    // good quadrilateral.  Tiny-edge or distorted pentagons use a five-quad
-    // star so the short edge remains local and does not create a long skinny fan.
+    // A tiny boundary edge is best kept local. First try the two ears that
+    // contain that edge; accept the one whose remaining quadrilateral is clean.
+    if(tiny&&max_cells>=2){
+        int ear=-1;double ear_score=std::numeric_limits<double>::infinity();
+        for(int i=0;i<5;++i){
+            const bool contains_short=(i==short_edge)||((i+1)%5==short_edge);
+            if(!contains_short)continue;
+            const std::array<P2,3> t{p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]};
+            const std::array<P2,4> q{p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+2)%5)],
+                                     p[static_cast<std::size_t>((i+3)%5)],p[static_cast<std::size_t>((i+4)%5)]};
+            if(!convex_quad_points(q))continue;
+            const double qq=quad_quality(q);
+            if(qq+1e-12<b.cfg.min_quad_quality)continue;
+            const double score=triangle_aspect_ratio(t[0],t[1],t[2])+quad_aspect_ratio(q);
+            if(score<ear_score){ear_score=score;ear=i;}
+        }
+        if(ear>=0){
+            const int i=ear;
+            b.triangle(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]);
+            b.quad(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+2)%5)],
+                   p[static_cast<std::size_t>((i+3)%5)],p[static_cast<std::size_t>((i+4)%5)]);
+            return;
+        }
+    }
+
+    // A clean non-tiny pentagon can also use the best 2-cell ear split.
     if(!tiny&&best.i>=0&&best.score<0.5&&max_cells>=2){
         const int i=best.i;
         b.triangle(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]);
