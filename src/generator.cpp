@@ -728,6 +728,10 @@ void mesh_quad_polygon(PhaseBuilder& b,const std::array<P2,4>& q,int target_cell
 
 void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cells){
     if(max_cells<5)throw std::runtime_error("pentagon all-quad strategy requires at least five cells");
+    const std::size_t node_begin=b.mesh.nodes.size();
+    auto freeze_new_nodes=[&](){
+        for(std::size_t i=node_begin;i<b.mesh.nodes.size();++i)b.mesh.nodes[i].fixed=true;
+    };
 
     const std::vector<P2> poly(p.begin(),p.end());
     P2 center=polygon_centroid(poly);
@@ -814,6 +818,7 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
             const P2 prev=edge_point_at((i+4)%5,split[static_cast<std::size_t>((i+4)%5)]);
             b.quad(p[static_cast<std::size_t>(i)],next,center,prev);
         }
+        freeze_new_nodes();
         return;
     }
 
@@ -987,6 +992,7 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
                ring_best.center,
                imid[static_cast<std::size_t>((i+4)%5)]);
     }
+    freeze_new_nodes();
 }
 
 void rebuild_constraint_edges(Mesh& m){
