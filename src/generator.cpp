@@ -727,77 +727,99 @@ void mesh_quad_polygon(PhaseBuilder& b,const std::array<P2,4>& q,int target_cell
 }
 
 void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cells){
-    double min_len=std::numeric_limits<double>::infinity(),max_len=0.0;
-    int short_edge=0;
-    for(int i=0;i<5;++i){
-        const double l=std::sqrt(dist2(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)]));
-        if(l<min_len){min_len=l;short_edge=i;}max_len=std::max(max_len,l);
-    }
-    const bool tiny=max_len>0.0&&min_len/max_len<b.cfg.pentagon_small_edge_fraction;
+    if(max_cells<5)throw std::runtime_error("pentagon all-quad strategy requires at least five cells");
 
-    struct Split{int i{-1};double score{std::numeric_limits<double>::infinity()};};
-    Split best;
-    for(int i=0;i<5;++i){
-        const std::array<P2,3> t{p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]};
-        const std::array<P2,4> q{p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+2)%5)],
-                                 p[static_cast<std::size_t>((i+3)%5)],p[static_cast<std::size_t>((i+4)%5)]};
-        if(!convex_quad_points(q))continue;
-        const double ta=triangle_aspect_ratio(t[0],t[1],t[2]);
-        const double qa=quad_aspect_ratio(q);
-        const double qq=quad_quality(q);
-        const bool contains_short=(i==short_edge)||((i+1)%5==short_edge);
-        double score=std::max(ta/b.cfg.triangle_aspect_threshold,qa/b.cfg.quad_aspect_threshold);
-        score+=std::max(0.0,b.cfg.min_quad_quality-qq)*8.0;
-        if(tiny&&!contains_short)score+=4.0;
-        if(ta<b.cfg.triangle_aspect_threshold&&qa<b.cfg.quad_aspect_threshold&&qq>=b.cfg.min_quad_quality)
-            score-=2.0;
-        if(score<best.score)best={i,score};
-    }
-
-    // A tiny boundary edge is best kept local. First try the two ears that
-    // contain that edge; accept the one whose remaining quadrilateral is clean.
-    if(tiny&&max_cells>=2){
-        int ear=-1;double ear_score=std::numeric_limits<double>::infinity();
-        for(int i=0;i<5;++i){
-            const bool contains_short=(i==short_edge)||((i+1)%5==short_edge);
-            if(!contains_short)continue;
-            const std::array<P2,3> t{p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]};
-            const std::array<P2,4> q{p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+2)%5)],
-                                     p[static_cast<std::size_t>((i+3)%5)],p[static_cast<std::size_t>((i+4)%5)]};
-            if(!convex_quad_points(q))continue;
-            const double qq=quad_quality(q);
-            if(qq+1e-12<b.cfg.min_quad_quality)continue;
-            const double score=triangle_aspect_ratio(t[0],t[1],t[2])+quad_aspect_ratio(q);
-            if(score<ear_score){ear_score=score;ear=i;}
-        }
-        if(ear>=0){
-            const int i=ear;
-            b.triangle(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]);
-            b.quad(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+2)%5)],
-                   p[static_cast<std::size_t>((i+3)%5)],p[static_cast<std::size_t>((i+4)%5)]);
-            return;
-        }
-    }
-
-    // A clean non-tiny pentagon can also use the best 2-cell ear split.
-    if(!tiny&&best.i>=0&&best.score<0.5&&max_cells>=2){
-        const int i=best.i;
-        b.triangle(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]);
-        b.quad(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+2)%5)],
-               p[static_cast<std::size_t>((i+3)%5)],p[static_cast<std::size_t>((i+4)%5)]);
-        return;
-    }
-
-    if(max_cells<5)throw std::runtime_error("pentagon strategy requires at least five cells for robust fallback");
     const std::vector<P2> poly(p.begin(),p.end());
-    const P2 c=polygon_centroid(poly);
-    std::array<P2,5> mid{};
+    P2 center=polygon_centroid(poly);
+    std::array<double,5> split{0.5,0.5,0.5,0.5,0.5};
+
+    auto edge_point_at=[&](int i,double t){
+        const P2 a=p[static_cast<std::size_t>(i)];
+        const P2 d=p[static_cast<std::size_t>((i+1)%5)];
+        return P2{a.x+t*(d.x-a.x),a.y+t*(d.y-a.y)};
+    };
+
+    auto objective=[&](P2 c,const std::array<double,5>& t){
+        if(!inside_convex_polygon(poly,c))return -1.0;
+        double qmin=std::numeric_limits<double>::infinity();
+        for(int i=0;i<5;++i){
+            const P2 next=edge_point_at(i,t[static_cast<std::size_t>(i)]);
+            const P2 prev=edge_point_at((i+4)%5,t[static_cast<std::size_t>((i+4)%5)]);
+            std::array<P2,4> q{p[static_cast<std::size_t>(i)],next,c,prev};
+            if(area_poly(std::vector<P2>(q.begin(),q.end()))<0.0)std::reverse(q.begin(),q.end());
+            if(!convex_quad_points(q))return -1.0;
+            qmin=std::min(qmin,quad_quality(q));
+        }
+        return qmin;
+    };
+
+    double best=objective(center,split);
+
+    // First improve the center using deterministic interior candidates.  The
+    // objective is the worst scaled Jacobian across all five quads.
+    std::vector<P2> center_candidates;
+    center_candidates.push_back(center);
     for(int i=0;i<5;++i){
-        const P2 a=p[static_cast<std::size_t>(i)],d=p[static_cast<std::size_t>((i+1)%5)];
-        mid[static_cast<std::size_t>(i)]={0.5*(a.x+d.x),0.5*(a.y+d.y)};
+        const P2 vi=p[static_cast<std::size_t>(i)];
+        const P2 mi=edge_point_at(i,0.5);
+        center_candidates.push_back({0.75*center.x+0.25*vi.x,0.75*center.y+0.25*vi.y});
+        center_candidates.push_back({0.75*center.x+0.25*mi.x,0.75*center.y+0.25*mi.y});
     }
-    for(int i=0;i<5;++i)
-        b.quad(p[static_cast<std::size_t>(i)],mid[static_cast<std::size_t>(i)],c,mid[static_cast<std::size_t>((i+4)%5)]);
+    for(P2 c:center_candidates){
+        const double q=objective(c,split);
+        if(q>best){best=q;center=c;}
+    }
+
+    // Coordinate search over center position and the five boundary split
+    // parameters.  Boundary split points remain on their original edges.
+    double span=0.0;
+    for(int i=0;i<5;++i)span=std::max(span,std::sqrt(dist2(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)])));
+    double center_step=0.12*std::max(span,1e-6);
+    double split_step=0.18;
+    for(int pass=0;pass<48;++pass){
+        bool improved=false;
+
+        const std::array<P2,8> dirs{{
+            {1,0},{-1,0},{0,1},{0,-1},
+            {0.7071067811865476,0.7071067811865476},
+            {-0.7071067811865476,0.7071067811865476},
+            {0.7071067811865476,-0.7071067811865476},
+            {-0.7071067811865476,-0.7071067811865476}
+        }};
+        for(P2 d:dirs){
+            const P2 cand{center.x+center_step*d.x,center.y+center_step*d.y};
+            const double q=objective(cand,split);
+            if(q>best+1e-12){best=q;center=cand;improved=true;}
+        }
+
+        for(int i=0;i<5;++i){
+            for(double sign:{-1.0,1.0}){
+                auto cand=split;
+                cand[static_cast<std::size_t>(i)]=std::clamp(cand[static_cast<std::size_t>(i)]+sign*split_step,0.12,0.88);
+                const double q=objective(center,cand);
+                if(q>best+1e-12){best=q;split=cand;improved=true;}
+            }
+        }
+
+        if(!improved){
+            center_step*=0.55;
+            split_step*=0.55;
+            if(center_step<1e-7&&split_step<1e-5)break;
+        }
+    }
+
+    if(best+1e-12<b.cfg.min_quad_quality){
+        std::ostringstream msg;
+        msg<<"pentagon all-quad optimization could not meet minimum scaled Jacobian: q="
+           <<best<<" threshold="<<b.cfg.min_quad_quality;
+        throw std::runtime_error(msg.str());
+    }
+
+    for(int i=0;i<5;++i){
+        const P2 next=edge_point_at(i,split[static_cast<std::size_t>(i)]);
+        const P2 prev=edge_point_at((i+4)%5,split[static_cast<std::size_t>((i+4)%5)]);
+        b.quad(p[static_cast<std::size_t>(i)],next,center,prev);
+    }
 }
 
 void rebuild_constraint_edges(Mesh& m){
