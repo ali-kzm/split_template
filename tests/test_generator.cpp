@@ -89,6 +89,12 @@ static int read_element_count(const fs::path& p) {
     return -1;
 }
 
+static void require_true(bool value, const std::string& message) {
+    if (value) return;
+    std::cerr << "requirement failed: " << message << "\n";
+    std::abort();
+}
+
 static void require_success(const pvmls::GenerationSummary& s) {
     if (s.success) return;
     std::cerr << "generation failed: accepted=" << s.accepted << "/" << s.requested << "\n";
@@ -145,7 +151,12 @@ int main() {
         const int pos_edges=read_section_count(dat,"INTERFACE_EDGES_POSITIVE ");
         assert(neg_edges>=1 && pos_edges>=1);
         assert(neg_edges!=pos_edges);
-        assert(read_element_count(dat)<=cfg.max_elements);
+        require_true(read_element_count(dat)<=cfg.max_elements,"element hard cap");
+        if(id==3)require_true(read_section_count(dat,"TRIANGLES ")==0,"case 3 must be quad-only");
+        if(id==11){
+            require_true(read_section_count(dat,"TRIANGLES ")==2,"case 11 must remain two unrefined triangles");
+            require_true(read_section_count(dat,"QUADS ")==0,"case 11 must contain no quads");
+        }
         assert_jpeg(jpg, cfg.image_size);
     }
 
@@ -197,22 +208,22 @@ int main() {
         }
     }
 
-    // Case 11 must keep fixed interface geometry while varying interior layout.
-    cfg.output = root / "case11_variation";
+    // Under the polygon strategy the fixed diagonal creates two regular
+    // triangles (aspect < 3), so case 11 has one canonical unrefined mesh.
+    cfg.output = root / "case11_canonical";
     cfg.templates_per_case = 2;
     cfg.cases = {11};
     cfg.seed = 2002;
     cfg.overwrite = true;
     s = pvmls::generate_dataset(cfg);
     require_success(s);
-    assert(s.accepted == 2);
+    require_true(s.requested==1 && s.accepted==1,"case 11 must collapse to one canonical template");
     const auto a = slurp(cfg.output / "case_11/temp_01.dat");
-    const auto b = slurp(cfg.output / "case_11/temp_02.dat");
-    assert(a != b);
-    assert(a.find("INTERFACE_ENDPOINT 0 -1 -1") != std::string::npos);
-    assert(a.find("INTERFACE_ENDPOINT 1 1 1") != std::string::npos);
-    assert(b.find("INTERFACE_ENDPOINT 0 -1 -1") != std::string::npos);
-    assert(b.find("INTERFACE_ENDPOINT 1 1 1") != std::string::npos);
+    require_true(!fs::exists(cfg.output / "case_11/temp_02.dat"),"case 11 must not publish duplicate template 2");
+    require_true(a.find("INTERFACE_ENDPOINT 0 -1 -1") != std::string::npos,"case 11 endpoint 0");
+    require_true(a.find("INTERFACE_ENDPOINT 1 1 1") != std::string::npos,"case 11 endpoint 1");
+    require_true(read_section_count(cfg.output / "case_11/temp_01.dat","TRIANGLES ")==2,"case 11 triangle count");
+    require_true(read_section_count(cfg.output / "case_11/temp_01.dat","QUADS ")==0,"case 11 quad count");
 
     // Reproducibility: same seed/config produces byte-identical data files.
     pvmls::Config r1 = cfg;
