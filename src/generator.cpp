@@ -1147,9 +1147,10 @@ void validate_mesh(Mesh&m,const Config&cfg,int cid){
     double area=0;
     for(const auto&t:m.tris){
         const double q=triangle_quality(m.nodes[t.v[0]].p,m.nodes[t.v[1]].p,m.nodes[t.v[2]].p);
-        if(q+1e-12<cfg.min_triangle_quality){
+        const double tar=triangle_aspect_ratio(m.nodes[t.v[0]].p,m.nodes[t.v[1]].p,m.nodes[t.v[2]].p);
+        if(q+1e-12<cfg.min_triangle_quality && tar<cfg.triangle_aspect_threshold){
             std::ostringstream msg;msg<<"triangle quality threshold violated: q="<<q<<" phase="<<t.phase
-                                      <<" threshold="<<cfg.min_triangle_quality
+                                      <<" aspect="<<tar<<" threshold="<<cfg.min_triangle_quality
                                       <<" v0=("<<m.nodes[t.v[0]].p.x<<","<<m.nodes[t.v[0]].p.y<<")"
                                       <<" v1=("<<m.nodes[t.v[1]].p.x<<","<<m.nodes[t.v[1]].p.y<<")"
                                       <<" v2=("<<m.nodes[t.v[2]].p.x<<","<<m.nodes[t.v[2]].p.y<<")";
@@ -1197,7 +1198,9 @@ std::string serialize(const Mesh&m,const Config&cfg,int cid,int tid,std::uint64_
     o<<"META\nCASE "<<cid<<"\nTEMPLATE "<<tid<<"\nSEED "<<seed<<"\n";
     o<<"CONFIG phi_zero_tol "<<cfg.phi_zero_tol<<" min_edge_fraction "<<cfg.min_edge_fraction
      <<" target_edge_length "<<cfg.target_edge_length<<" target_elements "<<cfg.target_elements
-     <<" max_elements "<<cfg.max_elements<<" min_triangle_quality "<<cfg.min_triangle_quality
+     <<" max_elements "<<cfg.max_elements<<" triangle_aspect_threshold "<<cfg.triangle_aspect_threshold
+     <<" quad_aspect_threshold "<<cfg.quad_aspect_threshold<<" pentagon_small_edge_fraction "<<cfg.pentagon_small_edge_fraction
+     <<" min_triangle_quality "<<cfg.min_triangle_quality
      <<" min_quad_quality "<<cfg.min_quad_quality<<" max_nodes "<<cfg.max_nodes
      <<" max_attempts_per_template "<<cfg.max_attempts_per_template<<" max_smoothing_passes "<<cfg.max_smoothing_passes
      <<" image_size "<<cfg.image_size<<"\n";
@@ -1268,7 +1271,6 @@ Candidate build_candidate(const Config&cfg,int cid,int tid,int attempt){
     std::mt19937_64 rng(mix_seed(cfg.seed,cid,tid,attempt));
     const auto iface=sample_interface(cfg,cid,tid,attempt,rng);
     Mesh m=triangulate_primary(cfg,cid,iface,rng);
-    pair_triangles(m,cfg);
     smooth(m,cfg);
     refresh_quality(m);update_metrics(m);
     enrich(m,cfg);update_metrics(m);
@@ -1374,6 +1376,9 @@ void validate_config(const Config&c){
     if(!finite(c.target_edge_length)||!(c.target_edge_length>0))throw std::invalid_argument("target-edge-length must be finite and positive");
     if(c.target_elements<2)throw std::invalid_argument("target-elements must be at least 2");
     if(c.max_elements<c.target_elements)throw std::invalid_argument("max-elements must be >= target-elements");
+    if(!finite(c.triangle_aspect_threshold)||c.triangle_aspect_threshold<=1.0)throw std::invalid_argument("triangle-aspect-threshold must be finite and > 1");
+    if(!finite(c.quad_aspect_threshold)||c.quad_aspect_threshold<=1.0)throw std::invalid_argument("quad-aspect-threshold must be finite and > 1");
+    if(!finite(c.pentagon_small_edge_fraction)||c.pentagon_small_edge_fraction<=0.0||c.pentagon_small_edge_fraction>=1.0)throw std::invalid_argument("pentagon-small-edge-fraction must lie in (0,1)");
     if(!finite(c.min_triangle_quality)||c.min_triangle_quality<0||c.min_triangle_quality>1)throw std::invalid_argument("min-triangle-quality must be in [0,1]");
     if(!finite(c.min_quad_quality)||c.min_quad_quality<0||c.min_quad_quality>1)throw std::invalid_argument("min-quad-quality must be in [0,1]");
     if(c.max_nodes==0)throw std::invalid_argument("max-nodes must be positive");
