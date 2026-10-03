@@ -559,128 +559,285 @@ int finite_face_count(const CDT& cdt){
     return n;
 }
 
-void append_phase_triangulation(Mesh& mesh,const Config& cfg,const InterfaceGeom& iface,
-                                int phase,int target_cells,int max_cells,int interface_segments,
-                                std::mt19937_64& rng){
-    auto poly=clip_phase_polygon(iface,phase);
-    if(poly.size()<3)throw std::runtime_error("empty phase polygon");
-    const double area=std::abs(area_poly(poly));
-    if(!(area>kGeomTol))throw std::runtime_error("degenerate phase polygon");
 
-    CDT cdt;
-    struct Chain{std::vector<VH> v;bool interface_edge{false};int square_edge{-1};};
-    std::vector<Chain> chains;
-    int boundary_vertex_estimate=0;
+double triangle_aspect_ratio(P2 a,P2 b,P2 c){
+    const double twice_area=std::abs(cross(a,b,c));
+    if(!(twice_area>kGeomTol))return std::numeric_limits<double>::infinity();
+    return std::max({dist2(a,b),dist2(b,c),dist2(c,a)})/twice_area;
+}
 
-    for(std::size_t i=0;i<poly.size();++i){
-        const P2 a=poly[i],b=poly[(i+1)%poly.size()];
-        const bool on_interface=std::abs(phi_raw(iface,a))<=1e-9 && std::abs(phi_raw(iface,b))<=1e-9;
-        const P2 mid{0.5*(a.x+b.x),0.5*(a.y+b.y)};
-        const int be=on_interface?-1:boundary_edge(mid);
-        int segments=1;
-        if(on_interface)segments=std::max(1,interface_segments);
-        else if(std::sqrt(dist2(a,b))>1.65 && target_cells>=6)segments=2;
-
-        Chain chain;chain.interface_edge=on_interface;chain.square_edge=be;
-        for(int k=0;k<=segments;++k){
-            const double t=static_cast<double>(k)/segments;
-            P2 p{a.x+t*(b.x-a.x),a.y+t*(b.y-a.y)};
-            chain.v.push_back(cdt.insert(Point(p.x,p.y)));
-        }
-        add_constraint_chain(cdt,chain.v);
-        boundary_vertex_estimate+=segments;
-        chains.push_back(std::move(chain));
+bool convex_quad_points(const std::array<P2,4>& p){
+    double sign=0.0;
+    for(int i=0;i<4;++i){
+        const double z=cross(p[static_cast<std::size_t>(i)],
+                             p[static_cast<std::size_t>((i+1)%4)],
+                             p[static_cast<std::size_t>((i+2)%4)]);
+        if(std::abs(z)<=kGeomTol)return false;
+        if(i==0)sign=z;
+        else if(z*sign<=0.0)return false;
     }
+    return true;
+}
 
-    const int base_triangles=std::max(1,boundary_vertex_estimate-2);
-    const int base_cells=(base_triangles+1)/2;
-    int requested_interior=std::max(0,target_cells-base_cells);
-    requested_interior=std::min(requested_interior,std::max(0,max_cells-base_cells));
+double quad_aspect_ratio(const std::array<P2,4>& p){
+    const double a=quad_area(p);
+    if(!(a>kGeomTol)||!convex_quad_points(p))return std::numeric_limits<double>::infinity();
+    double max_e2=0.0;
+    for(int i=0;i<4;++i)max_e2=std::max(max_e2,dist2(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%4)]));
+    const double angular=1.0/std::max(1e-8,quad_quality(p));
+    return std::max(max_e2/a,angular);
+}
 
-    double xmin=1e9,xmax=-1e9,ymin=1e9,ymax=-1e9;
-    for(P2 p:poly){xmin=std::min(xmin,p.x);xmax=std::max(xmax,p.x);ymin=std::min(ymin,p.y);ymax=std::max(ymax,p.y);}
-    std::uniform_real_distribution<double> ux(xmin,xmax),uy(ymin,ymax);
-    std::vector<P2> interior_points;
-    interior_points.reserve(static_cast<std::size_t>(requested_interior));
-    for(int ip=0;ip<requested_interior;++ip){
-        std::optional<P2> best;
-        double best_score=-1.0;
-        for(int trial=0;trial<500;++trial){
-            P2 p{ux(rng),uy(rng)};
-            if(!inside_convex_polygon(poly,p))continue;
-            double score=min_polygon_edge_distance(poly,p);
-            for(P2 q:interior_points)score=std::min(score,0.75*std::sqrt(dist2(p,q)));
-            if(score>best_score){best_score=score;best=p;}
-        }
-        if(!best||best_score<=1e-9)break;
-        cdt.insert(Point(best->x,best->y));
-        interior_points.push_back(*best);
+P2 polygon_centroid(const std::vector<P2>& p){
+    if(p.size()<3)throw std::runtime_error("polygon centroid requires at least three points");
+    double a2=0.0,cx=0.0,cy=0.0;
+    for(std::size_t i=0;i<p.size();++i){
+        const P2& u=p[i];const P2& v=p[(i+1)%p.size()];
+        const double z=u.x*v.y-v.x*u.y;
+        a2+=z;cx+=(u.x+v.x)*z;cy+=(u.y+v.y)*z;
     }
-
-    // Add only as many Steiner points as needed for quality, and never allow
-    // the phase to grow beyond its share of the configured max-element budget.
-    for(int refine=0;refine<12;++refine){
-        double worst=1.0;
-        std::optional<P2> candidate;
-        for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f){
-            P2 a{CGAL::to_double(f->vertex(0)->point().x()),CGAL::to_double(f->vertex(0)->point().y())};
-            P2 b{CGAL::to_double(f->vertex(1)->point().x()),CGAL::to_double(f->vertex(1)->point().y())};
-            P2 c{CGAL::to_double(f->vertex(2)->point().x()),CGAL::to_double(f->vertex(2)->point().y())};
-            const double orient=cross(a,b,c);
-            if(std::abs(orient)<=kGeomTol)continue;
-            P2 cen{(a.x+b.x+c.x)/3.0,(a.y+b.y+c.y)/3.0};
-            if(!inside_convex_polygon(poly,cen))continue;
-            if(orient<0)std::swap(b,c);
-            const double q=triangle_quality(a,b,c);
-            if(q<worst){worst=q;candidate=cen;}
-        }
-        if(worst+1e-12>=cfg.min_triangle_quality || !candidate)break;
-        if((finite_face_count(cdt)+2+1)/2>max_cells)break;
-        if(min_polygon_edge_distance(poly,*candidate)<1e-8)break;
-        cdt.insert(Point(candidate->x,candidate->y));
+    if(std::abs(a2)<=kGeomTol){
+        P2 c{};for(P2 x:p){c.x+=x.x;c.y+=x.y;}c.x/=static_cast<double>(p.size());c.y/=static_cast<double>(p.size());return c;
     }
+    return {cx/(3.0*a2),cy/(3.0*a2)};
+}
 
-    std::map<const void*,int> ids;
-    auto idof=[&](VH vh)->int{
-        const void* key=static_cast<const void*>(&*vh);
-        auto it=ids.find(key);if(it!=ids.end())return it->second;
-        P2 p{CGAL::to_double(vh->point().x()),CGAL::to_double(vh->point().y())};
+P2 bilinear_point(const std::array<P2,4>& q,double u,double v){
+    const double a=(1.0-u)*(1.0-v),b=u*(1.0-v),c=u*v,d=(1.0-u)*v;
+    return {a*q[0].x+b*q[1].x+c*q[2].x+d*q[3].x,
+            a*q[0].y+b*q[1].y+c*q[2].y+d*q[3].y};
+}
+
+struct PhaseBuilder{
+    Mesh& mesh;
+    const Config& cfg;
+    const InterfaceGeom& iface;
+    int phase;
+
+    int node(P2 p){
+        for(const auto& n:mesh.nodes){
+            if(!n.primary||n.owner_phase!=phase)continue;
+            if(dist2(n.p,p)<=1e-24)return n.id;
+        }
         Node n=make_node(p,iface,cfg,true);
         n.id=static_cast<int>(mesh.nodes.size());
         n.owner_phase=phase;
         if(n.constraint=="interface")n.parent_segment=phase<0?0:1;
         mesh.nodes.push_back(n);
-        ids[key]=n.id;
         return n.id;
-    };
+    }
 
-    for(auto f=cdt.finite_faces_begin();f!=cdt.finite_faces_end();++f){
-        P2 p[3];
-        for(int k=0;k<3;++k)p[k]={CGAL::to_double(f->vertex(k)->point().x()),CGAL::to_double(f->vertex(k)->point().y())};
-        const double orient=cross(p[0],p[1],p[2]);
-        if(std::abs(orient)<=kGeomTol)continue;
-        P2 cen{(p[0].x+p[1].x+p[2].x)/3.0,(p[0].y+p[1].y+p[2].y)/3.0};
-        if(!inside_convex_polygon(poly,cen))continue;
-        const int cs=classify_phi(phi_raw(iface,cen),cfg.phi_zero_tol);
-        if(cs!=phase && cs!=0)continue;
-        Tri t;t.phase=phase;
-        for(int k=0;k<3;++k)t.v[static_cast<std::size_t>(k)]=idof(f->vertex(k));
-        if(cross(mesh.nodes[t.v[0]].p,mesh.nodes[t.v[1]].p,mesh.nodes[t.v[2]].p)<0)std::swap(t.v[1],t.v[2]);
+    void triangle(P2 a,P2 b,P2 c){
+        if(cross(a,b,c)<0.0)std::swap(b,c);
+        if(cross(a,b,c)<=kGeomTol)throw std::runtime_error("polygon strategy produced degenerate triangle");
+        Tri t;t.phase=phase;t.v={node(a),node(b),node(c)};
         t.quality=triangle_quality(mesh.nodes[t.v[0]].p,mesh.nodes[t.v[1]].p,mesh.nodes[t.v[2]].p);
         mesh.tris.push_back(t);
     }
 
-    const std::size_t side=phase<0?0U:1U;
-    for(const auto& chain:chains){
-        for(std::size_t i=1;i<chain.v.size();++i){
-            const std::array<int,2> e{idof(chain.v[i-1]),idof(chain.v[i])};
-            if(chain.interface_edge)mesh.interface_edges[side].push_back(e);
-            else if(chain.square_edge>=0)mesh.boundary_edges.push_back(e);
+    void quad(P2 a,P2 b,P2 c,P2 d){
+        std::array<P2,4> p{a,b,c,d};
+        if(area_poly(std::vector<P2>(p.begin(),p.end()))<0.0){std::swap(b,d);p={a,b,c,d};}
+        if(!convex_quad_points(p))throw std::runtime_error("polygon strategy produced nonconvex quad");
+        Quad q;q.phase=phase;q.v={node(a),node(b),node(c),node(d)};q.quality=quad_quality(p);
+        mesh.quads.push_back(q);
+    }
+};
+
+void mesh_triangle_polygon(PhaseBuilder& b,const std::array<P2,3>& tri,int max_cells){
+    const double ar=triangle_aspect_ratio(tri[0],tri[1],tri[2]);
+    if(ar<b.cfg.triangle_aspect_threshold||max_cells<=1){
+        b.triangle(tri[0],tri[1],tri[2]);
+        return;
+    }
+
+    int tip=0;
+    double best_cos=-2.0;
+    for(int i=0;i<3;++i){
+        const P2 a=tri[static_cast<std::size_t>((i+1)%3)],v=tri[static_cast<std::size_t>(i)],c=tri[static_cast<std::size_t>((i+2)%3)];
+        const double ux=a.x-v.x,uy=a.y-v.y,vx=c.x-v.x,vy=c.y-v.y;
+        const double den=std::hypot(ux,uy)*std::hypot(vx,vy);
+        if(!(den>0.0))continue;
+        const double cs=(ux*vx+uy*vy)/den;
+        if(cs>best_cos){best_cos=cs;tip=i;}
+    }
+
+    const P2 T=tri[static_cast<std::size_t>(tip)];
+    const P2 L=tri[static_cast<std::size_t>((tip+1)%3)];
+    const P2 R=tri[static_cast<std::size_t>((tip+2)%3)];
+    const int requested=std::max(1,static_cast<int>(std::ceil(ar/b.cfg.triangle_aspect_threshold)));
+    const int strips=std::clamp(requested,1,std::max(1,max_cells-1));
+    const double shrink=std::clamp(1.0-1.35/ar,0.52,0.82);
+
+    double outer=1.0;
+    for(int k=0;k<strips;++k){
+        const double inner=outer*shrink;
+        const P2 lo{T.x+outer*(L.x-T.x),T.y+outer*(L.y-T.y)};
+        const P2 ro{T.x+outer*(R.x-T.x),T.y+outer*(R.y-T.y)};
+        const P2 li{T.x+inner*(L.x-T.x),T.y+inner*(L.y-T.y)};
+        const P2 ri{T.x+inner*(R.x-T.x),T.y+inner*(R.y-T.y)};
+        b.quad(lo,ro,ri,li);
+        outer=inner;
+    }
+    const P2 lf{T.x+outer*(L.x-T.x),T.y+outer*(L.y-T.y)};
+    const P2 rf{T.x+outer*(R.x-T.x),T.y+outer*(R.y-T.y)};
+    b.triangle(T,lf,rf);
+}
+
+std::pair<int,int> choose_quad_grid(const std::array<P2,4>& q,int desired,int max_cells){
+    const double lu=0.5*(std::sqrt(dist2(q[0],q[1]))+std::sqrt(dist2(q[3],q[2])));
+    const double lv=0.5*(std::sqrt(dist2(q[0],q[3]))+std::sqrt(dist2(q[1],q[2])));
+    const double ratio=std::max(1e-8,lu/std::max(1e-8,lv));
+    int best_u=1,best_v=1;double best=std::numeric_limits<double>::infinity();
+    desired=std::clamp(desired,1,max_cells);
+    for(int nu=1;nu<=max_cells;++nu){
+        for(int nv=1;nu*nv<=max_cells;++nv){
+            const int n=nu*nv;
+            const double anis=std::abs(std::log((static_cast<double>(nu)/nv)/ratio));
+            const double count_penalty=(n<desired?2.0:0.18)*std::abs(n-desired);
+            const double score=anis+count_penalty;
+            if(score<best){best=score;best_u=nu;best_v=nv;}
         }
+    }
+    return {best_u,best_v};
+}
+
+void mesh_quad_polygon(PhaseBuilder& b,const std::array<P2,4>& q,int target_cells,int max_cells){
+    const double ar=quad_aspect_ratio(q);
+    const double area=quad_area(q);
+    int desired=2;
+    if(ar<=b.cfg.quad_aspect_threshold){
+        desired=area>1.25?4:2;
+    }else{
+        desired=std::max(4,target_cells);
+        desired=std::max(desired,2*static_cast<int>(std::ceil(ar/b.cfg.quad_aspect_threshold)));
+    }
+    desired=std::clamp(desired,1,max_cells);
+    auto [nu,nv]=choose_quad_grid(q,desired,max_cells);
+
+    std::vector<std::vector<P2>> grid(static_cast<std::size_t>(nv+1),std::vector<P2>(static_cast<std::size_t>(nu+1)));
+    for(int j=0;j<=nv;++j)for(int i=0;i<=nu;++i)
+        grid[static_cast<std::size_t>(j)][static_cast<std::size_t>(i)]=bilinear_point(q,static_cast<double>(i)/nu,static_cast<double>(j)/nv);
+    for(int j=0;j<nv;++j)for(int i=0;i<nu;++i){
+        b.quad(grid[static_cast<std::size_t>(j)][static_cast<std::size_t>(i)],
+               grid[static_cast<std::size_t>(j)][static_cast<std::size_t>(i+1)],
+               grid[static_cast<std::size_t>(j+1)][static_cast<std::size_t>(i+1)],
+               grid[static_cast<std::size_t>(j+1)][static_cast<std::size_t>(i)]);
+    }
+}
+
+void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cells){
+    double min_len=std::numeric_limits<double>::infinity(),max_len=0.0;
+    int short_edge=0;
+    for(int i=0;i<5;++i){
+        const double l=std::sqrt(dist2(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)]));
+        if(l<min_len){min_len=l;short_edge=i;}max_len=std::max(max_len,l);
+    }
+    const bool tiny=max_len>0.0&&min_len/max_len<b.cfg.pentagon_small_edge_fraction;
+
+    struct Split{int i{-1};double score{std::numeric_limits<double>::infinity()};};
+    Split best;
+    for(int i=0;i<5;++i){
+        const std::array<P2,3> t{p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]};
+        const std::array<P2,4> q{p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+2)%5)],
+                                 p[static_cast<std::size_t>((i+3)%5)],p[static_cast<std::size_t>((i+4)%5)]};
+        if(!convex_quad_points(q))continue;
+        const double ta=triangle_aspect_ratio(t[0],t[1],t[2]);
+        const double qa=quad_aspect_ratio(q);
+        const double qq=quad_quality(q);
+        const bool contains_short=(i==short_edge)||((i+1)%5==short_edge);
+        double score=std::max(ta/b.cfg.triangle_aspect_threshold,qa/b.cfg.quad_aspect_threshold);
+        score+=std::max(0.0,b.cfg.min_quad_quality-qq)*8.0;
+        if(tiny&&!contains_short)score+=4.0;
+        if(ta<b.cfg.triangle_aspect_threshold&&qa<b.cfg.quad_aspect_threshold&&qq>=b.cfg.min_quad_quality)
+            score-=2.0;
+        if(score<best.score)best={i,score};
+    }
+
+    // A clean pentagon can often be represented by one good triangle plus one
+    // good quadrilateral.  Tiny-edge or distorted pentagons use a five-quad
+    // star so the short edge remains local and does not create a long skinny fan.
+    if(!tiny&&best.i>=0&&best.score<0.5&&max_cells>=2){
+        const int i=best.i;
+        b.triangle(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)],p[static_cast<std::size_t>((i+2)%5)]);
+        b.quad(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+2)%5)],
+               p[static_cast<std::size_t>((i+3)%5)],p[static_cast<std::size_t>((i+4)%5)]);
+        return;
+    }
+
+    if(max_cells<5)throw std::runtime_error("pentagon strategy requires at least five cells for robust fallback");
+    const std::vector<P2> poly(p.begin(),p.end());
+    const P2 c=polygon_centroid(poly);
+    std::array<P2,5> mid{};
+    for(int i=0;i<5;++i){
+        const P2 a=p[static_cast<std::size_t>(i)],d=p[static_cast<std::size_t>((i+1)%5)];
+        mid[static_cast<std::size_t>(i)]={0.5*(a.x+d.x),0.5*(a.y+d.y)};
+    }
+    for(int i=0;i<5;++i)
+        b.quad(p[static_cast<std::size_t>(i)],mid[static_cast<std::size_t>(i)],c,mid[static_cast<std::size_t>((i+4)%5)]);
+}
+
+void rebuild_constraint_edges(Mesh& m){
+    m.boundary_edges.clear();m.interface_edges[0].clear();m.interface_edges[1].clear();
+    std::map<std::array<int,2>,int> incidence;
+    auto add=[&](int a,int b){++incidence[edge_key(a,b)];};
+    for(const auto&t:m.tris)for(int e=0;e<3;++e)add(t.v[static_cast<std::size_t>(e)],t.v[static_cast<std::size_t>((e+1)%3)]);
+    for(const auto&q:m.quads)for(int e=0;e<4;++e)add(q.v[static_cast<std::size_t>(e)],q.v[static_cast<std::size_t>((e+1)%4)]);
+
+    struct RankedEdge{int group;double t;std::array<int,2> e;};
+    std::vector<RankedEdge> boundary;
+    std::array<std::vector<RankedEdge>,2> interface;
+    const double dx=m.iface.b.x-m.iface.a.x,dy=m.iface.b.y-m.iface.a.y,L2=dx*dx+dy*dy;
+    for(const auto&[e,count]:incidence){
+        if(count!=1)continue;
+        const auto& a=m.nodes[static_cast<std::size_t>(e[0])];
+        const auto& b=m.nodes[static_cast<std::size_t>(e[1])];
+        const bool ai=std::abs(phi_raw(m.iface,a.p))<=1e-8,bi=std::abs(phi_raw(m.iface,b.p))<=1e-8;
+        if(ai&&bi&&a.owner_phase==b.owner_phase){
+            auto ee=e;
+            double ta=((a.p.x-m.iface.a.x)*dx+(a.p.y-m.iface.a.y)*dy)/L2;
+            double tb=((b.p.x-m.iface.a.x)*dx+(b.p.y-m.iface.a.y)*dy)/L2;
+            if(tb<ta){std::swap(ee[0],ee[1]);std::swap(ta,tb);}
+            const std::size_t side=a.owner_phase<0?0U:1U;
+            interface[side].push_back({0,ta,ee});
+            continue;
+        }
+        const P2 mid{0.5*(a.p.x+b.p.x),0.5*(a.p.y+b.p.y)};
+        const int be=boundary_edge(mid);
+        if(be>=0){
+            auto ee=e;
+            double ta=edge_parameter(be,a.p),tb=edge_parameter(be,b.p);
+            if(tb<ta){std::swap(ee[0],ee[1]);std::swap(ta,tb);}
+            boundary.push_back({be,ta,ee});
+        }
+    }
+    std::sort(boundary.begin(),boundary.end(),[](const auto&a,const auto&b){return a.group!=b.group?a.group<b.group:a.t<b.t;});
+    for(const auto&x:boundary)m.boundary_edges.push_back(x.e);
+    for(std::size_t side=0;side<2;++side){
+        std::sort(interface[side].begin(),interface[side].end(),[](const auto&a,const auto&b){return a.t<b.t;});
+        for(const auto&x:interface[side])m.interface_edges[side].push_back(x.e);
+    }
+}
+
+void append_phase_polygon_mesh(Mesh& mesh,const Config& cfg,const InterfaceGeom& iface,
+                               int phase,int target_cells,int max_cells){
+    const auto poly=clip_phase_polygon(iface,phase);
+    if(poly.size()<3||poly.size()>5)throw std::runtime_error("unsupported clipped polygon vertex count");
+    PhaseBuilder b{mesh,cfg,iface,phase};
+    if(poly.size()==3){
+        std::array<P2,3> p{poly[0],poly[1],poly[2]};
+        mesh_triangle_polygon(b,p,max_cells);
+    }else if(poly.size()==4){
+        std::array<P2,4> p{poly[0],poly[1],poly[2],poly[3]};
+        mesh_quad_polygon(b,p,target_cells,max_cells);
+    }else{
+        std::array<P2,5> p{poly[0],poly[1],poly[2],poly[3],poly[4]};
+        mesh_pentagon_polygon(b,p,max_cells);
     }
 }
 
 Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,std::mt19937_64& rng){
+    (void)cid;(void)rng;
     Mesh mesh;mesh.iface=iface;
     const auto neg_poly=clip_phase_polygon(iface,-1);
     const auto pos_poly=clip_phase_polygon(iface,1);
@@ -688,30 +845,21 @@ Mesh triangulate_primary(const Config& cfg,int cid,const InterfaceGeom& iface,st
     if(!(an>kGeomTol&&ap>kGeomTol))throw std::runtime_error("degenerate phase area");
 
     const double wn=std::sqrt(an),wp=std::sqrt(ap);
-    const int min_each=cfg.target_elements>=8?3:1;
+    const int min_each=1;
     int target_neg=static_cast<int>(std::lround(cfg.target_elements*wn/(wn+wp)));
     target_neg=std::clamp(target_neg,min_each,cfg.target_elements-min_each);
     const int target_pos=cfg.target_elements-target_neg;
 
-    // Refinement budget is shared dynamically. Either phase may consume
-    // unused capacity from the other, while final validation still enforces
-    // the global max_elements hard cap.
-    const int max_neg=std::max(target_neg,cfg.max_elements-target_pos);
-    const int max_pos=std::max(target_pos,cfg.max_elements-target_neg);
+    int max_neg=static_cast<int>(std::lround(cfg.max_elements*wn/(wn+wp)));
+    max_neg=std::clamp(max_neg,target_neg,cfg.max_elements-target_pos);
+    const int max_pos=cfg.max_elements-max_neg;
 
-    int seg_neg=std::clamp((target_neg+1)/2,1,4);
-    int seg_pos=std::clamp((target_pos+1)/2,1,4);
-    if(seg_neg==seg_pos){
-        if(target_pos>=target_neg && seg_pos<5)++seg_pos;
-        else if(seg_neg<5)++seg_neg;
-        else --seg_pos;
-    }
-
-    append_phase_triangulation(mesh,cfg,iface,-1,target_neg,max_neg,seg_neg,rng);
-    append_phase_triangulation(mesh,cfg,iface, 1,target_pos,max_pos,seg_pos,rng);
+    append_phase_polygon_mesh(mesh,cfg,iface,-1,target_neg,max_neg);
+    append_phase_polygon_mesh(mesh,cfg,iface, 1,target_pos,max_pos);
+    rebuild_constraint_edges(mesh);
 
     if(mesh.nodes.size()>cfg.max_nodes)throw std::runtime_error("primary node count exceeds max-nodes");
-    if(mesh.tris.empty())throw std::runtime_error("empty independent phase triangulation");
+    if(mesh.tris.empty()&&mesh.quads.empty())throw std::runtime_error("empty polygon-template mesh");
     return mesh;
 }
 
