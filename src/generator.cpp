@@ -886,6 +886,75 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
         }
     }
 
+    auto ring_objective=[&](const std::array<P2,5>& inner,P2 c){
+        if(!inside_convex_polygon(poly,c))return -1.0;
+        for(P2 x:inner)if(!inside_convex_polygon(poly,x))return -1.0;
+        std::vector<P2> inner_poly(inner.begin(),inner.end());
+        if(area_poly(inner_poly)<=kGeomTol)return -1.0;
+        double qmin=std::numeric_limits<double>::infinity();
+        for(int i=0;i<5;++i){
+            std::array<P2,4> outer{p[static_cast<std::size_t>(i)],
+                                   p[static_cast<std::size_t>((i+1)%5)],
+                                   inner[static_cast<std::size_t>((i+1)%5)],
+                                   inner[static_cast<std::size_t>(i)]};
+            if(!convex_quad_points(outer))return -1.0;
+            qmin=std::min(qmin,quad_quality(outer));
+        }
+        std::array<P2,5> mid{};
+        for(int i=0;i<5;++i){
+            const P2 a=inner[static_cast<std::size_t>(i)];
+            const P2 d=inner[static_cast<std::size_t>((i+1)%5)];
+            mid[static_cast<std::size_t>(i)]={0.5*(a.x+d.x),0.5*(a.y+d.y)};
+        }
+        for(int i=0;i<5;++i){
+            std::array<P2,4> iq{inner[static_cast<std::size_t>(i)],
+                                mid[static_cast<std::size_t>(i)],
+                                c,
+                                mid[static_cast<std::size_t>((i+4)%5)]};
+            if(!convex_quad_points(iq))return -1.0;
+            qmin=std::min(qmin,quad_quality(iq));
+        }
+        return qmin;
+    };
+
+    // Local maximin optimization of the full 10-quad topology. Moving the
+    // inner-ring vertices lets the mesh adapt to strongly asymmetric cut
+    // pentagons while all original boundary vertices remain fixed.
+    if(ring_best.q+1e-12<b.cfg.min_quad_quality){
+        double step=0.18*clearance;
+        for(int pass=0;pass<72;++pass){
+            bool improved=false;
+            const std::array<P2,8> dirs{{
+                {1,0},{-1,0},{0,1},{0,-1},
+                {0.7071067811865476,0.7071067811865476},
+                {-0.7071067811865476,0.7071067811865476},
+                {0.7071067811865476,-0.7071067811865476},
+                {-0.7071067811865476,-0.7071067811865476}
+            }};
+
+            for(P2 d:dirs){
+                const P2 cand{ring_best.center.x+step*d.x,ring_best.center.y+step*d.y};
+                const double q=ring_objective(ring_best.inner,cand);
+                if(q>ring_best.q+1e-12){ring_best.q=q;ring_best.center=cand;improved=true;}
+            }
+
+            for(int i=0;i<5;++i){
+                for(P2 d:dirs){
+                    auto inner=ring_best.inner;
+                    inner[static_cast<std::size_t>(i)].x+=step*d.x;
+                    inner[static_cast<std::size_t>(i)].y+=step*d.y;
+                    const double q=ring_objective(inner,ring_best.center);
+                    if(q>ring_best.q+1e-12){ring_best.q=q;ring_best.inner=inner;improved=true;}
+                }
+            }
+
+            if(!improved){
+                step*=0.55;
+                if(step<1e-7)break;
+            }
+        }
+    }
+
     if(ring_best.q+1e-12<b.cfg.min_quad_quality){
         std::ostringstream msg;
         msg<<"pentagon all-quad optimization failed: 5-quad q="<<best
