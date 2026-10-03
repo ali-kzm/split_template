@@ -734,6 +734,12 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
     };
 
     const std::vector<P2> poly(p.begin(),p.end());
+    double min_edge=std::numeric_limits<double>::infinity(),max_edge=0.0;
+    for(int i=0;i<5;++i){
+        const double len=std::sqrt(dist2(p[static_cast<std::size_t>(i)],p[static_cast<std::size_t>((i+1)%5)]));
+        min_edge=std::min(min_edge,len);max_edge=std::max(max_edge,len);
+    }
+    const bool prefer_refined=max_edge>0.0 && min_edge/max_edge<b.cfg.pentagon_small_edge_fraction;
     P2 center=polygon_centroid(poly);
     std::array<double,5> split{0.5,0.5,0.5,0.5,0.5};
 
@@ -812,7 +818,7 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
         }
     }
 
-    if(best+1e-12>=b.cfg.min_quad_quality){
+    if(best+1e-12>=b.cfg.min_quad_quality&&!prefer_refined){
         for(int i=0;i<5;++i){
             const P2 next=edge_point_at(i,split[static_cast<std::size_t>(i)]);
             const P2 prev=edge_point_at((i+4)%5,split[static_cast<std::size_t>((i+4)%5)]);
@@ -827,6 +833,15 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
     // additional quads. This avoids propagating a nearly-straight pentagon
     // corner directly into a single element.
     if(max_cells<10){
+        if(best+1e-12>=b.cfg.min_quad_quality){
+            for(int i=0;i<5;++i){
+                const P2 next=edge_point_at(i,split[static_cast<std::size_t>(i)]);
+                const P2 prev=edge_point_at((i+4)%5,split[static_cast<std::size_t>((i+4)%5)]);
+                b.quad(p[static_cast<std::size_t>(i)],next,center,prev);
+            }
+            freeze_new_nodes();
+            return;
+        }
         std::ostringstream msg;
         msg<<"pentagon needs 10-quad fallback but phase budget is "<<max_cells
            <<" (5-quad optimized q="<<best<<")";
