@@ -984,6 +984,15 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
     }
 
     if(ring_best.q+1e-12<b.cfg.min_quad_quality){
+        if(best+1e-12>=b.cfg.min_quad_quality){
+            for(int i=0;i<5;++i){
+                const P2 next=edge_point_at(i,split[static_cast<std::size_t>(i)]);
+                const P2 prev=edge_point_at((i+4)%5,split[static_cast<std::size_t>((i+4)%5)]);
+                b.quad(p[static_cast<std::size_t>(i)],next,center,prev);
+            }
+            freeze_new_nodes();
+            return;
+        }
         std::ostringstream msg;
         msg<<"pentagon all-quad optimization failed: 5-quad q="<<best
            <<", 10-quad q="<<ring_best.q
