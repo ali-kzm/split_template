@@ -808,17 +808,107 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
         }
     }
 
-    if(best+1e-12<b.cfg.min_quad_quality){
+    if(best+1e-12>=b.cfg.min_quad_quality){
+        for(int i=0;i<5;++i){
+            const P2 next=edge_point_at(i,split[static_cast<std::size_t>(i)]);
+            const P2 prev=edge_point_at((i+4)%5,split[static_cast<std::size_t>((i+4)%5)]);
+            b.quad(p[static_cast<std::size_t>(i)],next,center,prev);
+        }
+        return;
+    }
+
+    // Refined all-quad fallback: five boundary-ring quads split difficult
+    // polygon angles, while a regularized inner pentagon is filled by five
+    // additional quads. This avoids propagating a nearly-straight pentagon
+    // corner directly into a single element.
+    if(max_cells<10){
         std::ostringstream msg;
-        msg<<"pentagon all-quad optimization could not meet minimum scaled Jacobian: q="
-           <<best<<" threshold="<<b.cfg.min_quad_quality;
+        msg<<"pentagon needs 10-quad fallback but phase budget is "<<max_cells
+           <<" (5-quad optimized q="<<best<<")";
         throw std::runtime_error(msg.str());
     }
 
+    const P2 ring_center=polygon_centroid(poly);
+    const double clearance=min_polygon_edge_distance(poly,ring_center);
+    if(!(clearance>1e-10))throw std::runtime_error("pentagon center has no interior clearance");
+
+    struct RingCandidate{
+        double q{-1.0};
+        std::array<P2,5> inner{};
+        P2 center{};
+    } ring_best;
+
+    const double base=std::atan2(p[0].y-ring_center.y,p[0].x-ring_center.x);
+    constexpr double two_pi=6.283185307179586476925286766559;
+    for(int ir=3;ir<=9;++ir){
+        const double radius=clearance*(0.10*ir);
+        for(int rot=-6;rot<=6;++rot){
+            const double theta0=base+rot*(two_pi/5.0)/18.0;
+            std::array<P2,5> inner{};
+            bool inside=true;
+            for(int i=0;i<5;++i){
+                const double th=theta0+two_pi*static_cast<double>(i)/5.0;
+                inner[static_cast<std::size_t>(i)]={ring_center.x+radius*std::cos(th),
+                                                    ring_center.y+radius*std::sin(th)};
+                if(!inside_convex_polygon(poly,inner[static_cast<std::size_t>(i)])){inside=false;break;}
+            }
+            if(!inside)continue;
+
+            double qmin=std::numeric_limits<double>::infinity();
+            bool valid=true;
+            for(int i=0;i<5&&valid;++i){
+                std::array<P2,4> outer{p[static_cast<std::size_t>(i)],
+                                       p[static_cast<std::size_t>((i+1)%5)],
+                                       inner[static_cast<std::size_t>((i+1)%5)],
+                                       inner[static_cast<std::size_t>(i)]};
+                if(!convex_quad_points(outer)){valid=false;break;}
+                qmin=std::min(qmin,quad_quality(outer));
+            }
+            if(!valid)continue;
+
+            std::array<P2,5> imid{};
+            for(int i=0;i<5;++i){
+                const P2 a=inner[static_cast<std::size_t>(i)];
+                const P2 d=inner[static_cast<std::size_t>((i+1)%5)];
+                imid[static_cast<std::size_t>(i)]={0.5*(a.x+d.x),0.5*(a.y+d.y)};
+            }
+            for(int i=0;i<5&&valid;++i){
+                std::array<P2,4> iq{inner[static_cast<std::size_t>(i)],
+                                    imid[static_cast<std::size_t>(i)],
+                                    ring_center,
+                                    imid[static_cast<std::size_t>((i+4)%5)]};
+                if(!convex_quad_points(iq)){valid=false;break;}
+                qmin=std::min(qmin,quad_quality(iq));
+            }
+            if(valid&&qmin>ring_best.q){
+                ring_best.q=qmin;ring_best.inner=inner;ring_best.center=ring_center;
+            }
+        }
+    }
+
+    if(ring_best.q+1e-12<b.cfg.min_quad_quality){
+        std::ostringstream msg;
+        msg<<"pentagon all-quad optimization failed: 5-quad q="<<best
+           <<", 10-quad q="<<ring_best.q
+           <<", threshold="<<b.cfg.min_quad_quality;
+        throw std::runtime_error(msg.str());
+    }
+
+    std::array<P2,5> imid{};
     for(int i=0;i<5;++i){
-        const P2 next=edge_point_at(i,split[static_cast<std::size_t>(i)]);
-        const P2 prev=edge_point_at((i+4)%5,split[static_cast<std::size_t>((i+4)%5)]);
-        b.quad(p[static_cast<std::size_t>(i)],next,center,prev);
+        const P2 a=ring_best.inner[static_cast<std::size_t>(i)];
+        const P2 d=ring_best.inner[static_cast<std::size_t>((i+1)%5)];
+        imid[static_cast<std::size_t>(i)]={0.5*(a.x+d.x),0.5*(a.y+d.y)};
+        b.quad(p[static_cast<std::size_t>(i)],
+               p[static_cast<std::size_t>((i+1)%5)],
+               ring_best.inner[static_cast<std::size_t>((i+1)%5)],
+               ring_best.inner[static_cast<std::size_t>(i)]);
+    }
+    for(int i=0;i<5;++i){
+        b.quad(ring_best.inner[static_cast<std::size_t>(i)],
+               imid[static_cast<std::size_t>(i)],
+               ring_best.center,
+               imid[static_cast<std::size_t>((i+4)%5)]);
     }
 }
 
