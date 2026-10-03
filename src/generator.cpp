@@ -855,6 +855,7 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
             if(!inside)continue;
 
             double qmin=std::numeric_limits<double>::infinity();
+            double tiled_area=0.0;
             bool valid=true;
             for(int i=0;i<5&&valid;++i){
                 std::array<P2,4> outer{p[static_cast<std::size_t>(i)],
@@ -863,6 +864,7 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
                                        inner[static_cast<std::size_t>(i)]};
                 if(!convex_quad_points(outer)){valid=false;break;}
                 qmin=std::min(qmin,quad_quality(outer));
+                tiled_area+=quad_area(outer);
             }
             if(!valid)continue;
 
@@ -879,7 +881,9 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
                                     imid[static_cast<std::size_t>((i+4)%5)]};
                 if(!convex_quad_points(iq)){valid=false;break;}
                 qmin=std::min(qmin,quad_quality(iq));
+                tiled_area+=quad_area(iq);
             }
+            if(valid&&std::abs(tiled_area-std::abs(area_poly(poly)))>5e-9)valid=false;
             if(valid&&qmin>ring_best.q){
                 ring_best.q=qmin;ring_best.inner=inner;ring_best.center=ring_center;
             }
@@ -892,6 +896,7 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
         std::vector<P2> inner_poly(inner.begin(),inner.end());
         if(area_poly(inner_poly)<=kGeomTol)return -1.0;
         double qmin=std::numeric_limits<double>::infinity();
+        double tiled_area=0.0;
         for(int i=0;i<5;++i){
             std::array<P2,4> outer{p[static_cast<std::size_t>(i)],
                                    p[static_cast<std::size_t>((i+1)%5)],
@@ -899,6 +904,7 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
                                    inner[static_cast<std::size_t>(i)]};
             if(!convex_quad_points(outer))return -1.0;
             qmin=std::min(qmin,quad_quality(outer));
+            tiled_area+=quad_area(outer);
         }
         std::array<P2,5> mid{};
         for(int i=0;i<5;++i){
@@ -913,7 +919,9 @@ void mesh_pentagon_polygon(PhaseBuilder& b,const std::array<P2,5>& p,int max_cel
                                 mid[static_cast<std::size_t>((i+4)%5)]};
             if(!convex_quad_points(iq))return -1.0;
             qmin=std::min(qmin,quad_quality(iq));
+            tiled_area+=quad_area(iq);
         }
+        if(std::abs(tiled_area-std::abs(area_poly(poly)))>5e-9)return -1.0;
         return qmin;
     };
 
