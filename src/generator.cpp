@@ -1387,7 +1387,8 @@ void validate_config(const Config&c){
     if(c.image_size<=0)throw std::invalid_argument("image-size must be positive");
 }
 GenerationSummary generate_dataset(const Config&cfg){
-    validate_config(cfg);GenerationSummary s;s.requested=cfg.templates_per_case*static_cast<int>(cfg.cases.size());
+    validate_config(cfg);GenerationSummary s;
+    for(int cid:cfg.cases)s.requested+=(cid==11?1:cfg.templates_per_case);
     if(fs::exists(cfg.output)&&!cfg.overwrite){
         if(!fs::is_directory(cfg.output))throw std::runtime_error("output path exists and is not a directory");
         const bool nonempty=fs::directory_iterator(cfg.output)!=fs::directory_iterator{};
@@ -1399,7 +1400,8 @@ GenerationSummary generate_dataset(const Config&cfg){
     for(int cid:cfg.cases){
         const auto dir=cfg.output/("case_"+std::to_string(cid));fs::create_directories(dir);
         std::unordered_set<std::string> signatures;
-        for(int ti=0;ti<cfg.templates_per_case;++ti){
+        const int requested_for_case=(cid==11?1:cfg.templates_per_case);
+        for(int ti=0;ti<requested_for_case;++ti){
             bool ok=false;std::string last;
             for(int attempt=0;attempt<cfg.max_attempts_per_template&&!ok;++attempt){
                 try{
