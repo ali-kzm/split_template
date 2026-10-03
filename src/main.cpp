@@ -23,6 +23,9 @@ void usage() {
         << "  --target-edge-length <real>       legacy spacing hint, default 0.3\n"
         << "  --target-elements <N>             desired primary cells, default 10\n"
         << "  --max-elements <N>                hard primary-cell cap, default 20\n"
+        << "  --triangle-aspect-threshold <r>   keep triangle whole below r, default 3\n"
+        << "  --quad-aspect-threshold <r>       regular/thin quad threshold, default 3\n"
+        << "  --pentagon-small-edge-fraction <r> tiny-edge trigger, default 0.15\n"
         << "  --min-triangle-quality <real>     default 0.05\n"
         << "  --min-quad-quality <real>         default 0.2\n"
         << "  --max-nodes <N>                   default 512\n"
@@ -76,6 +79,9 @@ int main(int argc, char** argv) {
             else if (arg == "--target-edge-length") cfg.target_edge_length = parse_number<double>(need(arg.c_str()));
             else if (arg == "--target-elements") cfg.target_elements = parse_number<int>(need(arg.c_str()));
             else if (arg == "--max-elements") cfg.max_elements = parse_number<int>(need(arg.c_str()));
+            else if (arg == "--triangle-aspect-threshold") cfg.triangle_aspect_threshold = parse_number<double>(need(arg.c_str()));
+            else if (arg == "--quad-aspect-threshold") cfg.quad_aspect_threshold = parse_number<double>(need(arg.c_str()));
+            else if (arg == "--pentagon-small-edge-fraction") cfg.pentagon_small_edge_fraction = parse_number<double>(need(arg.c_str()));
             else if (arg == "--min-triangle-quality") cfg.min_triangle_quality = parse_number<double>(need(arg.c_str()));
             else if (arg == "--min-quad-quality") cfg.min_quad_quality = parse_number<double>(need(arg.c_str()));
             else if (arg == "--max-nodes") cfg.max_nodes = parse_number<std::size_t>(need(arg.c_str()));
