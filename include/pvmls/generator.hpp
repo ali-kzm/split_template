@@ -18,6 +18,9 @@ struct Config {
     double target_edge_length{0.3};
     int target_elements{10};
     int max_elements{20};
+    double triangle_aspect_threshold{3.0};
+    double quad_aspect_threshold{3.0};
+    double pentagon_small_edge_fraction{0.15};
     double min_triangle_quality{0.05};
     double min_quad_quality{0.2};
     std::size_t max_nodes{512};
