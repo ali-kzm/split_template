@@ -72,6 +72,20 @@ static int read_section_count(const fs::path& p, const std::string& prefix) {
     return -1;
 }
 
+static int count_triangles_for_phase(const fs::path& p, int phase) {
+    std::ifstream in(p);
+    std::string line;
+    bool in_triangles=false;
+    int count=0;
+    while (std::getline(in,line)) {
+        if (line.rfind("TRIANGLES ",0)==0) { in_triangles=true; continue; }
+        if (!in_triangles) continue;
+        if (line.rfind("QUADS ",0)==0) break;
+        if (line.find(" phase " + std::to_string(phase) + " ")!=std::string::npos) ++count;
+    }
+    return count;
+}
+
 static int read_element_count(const fs::path& p) {
     std::ifstream in(p);
     std::string line;
@@ -152,6 +166,7 @@ int main() {
         assert(neg_edges>=1 && pos_edges>=1);
         assert(neg_edges!=pos_edges);
         require_true(read_element_count(dat)<=cfg.max_elements,"element hard cap");
+        if(id==2)require_true(count_triangles_for_phase(dat,1)==0,"case 2 pentagon phase must be quad-only");
         if(id==3)require_true(read_section_count(dat,"TRIANGLES ")==0,"case 3 must be quad-only");
         if(id==11){
             require_true(read_section_count(dat,"TRIANGLES ")==2,"case 11 must remain two unrefined triangles");
