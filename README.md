@@ -146,6 +146,9 @@ Example:
   --target-edge-length 0.3 \
   --target-elements 10 \
   --max-elements 20 \
+  --triangle-aspect-threshold 3 \
+  --quad-aspect-threshold 3 \
+  --pentagon-small-edge-fraction 0.15 \
   --min-triangle-quality 0.05 \
   --min-quad-quality 0.2 \
   --max-nodes 512 \
@@ -154,11 +157,21 @@ Example:
   --image-size 1024
 ```
 
-The generator meshes the negative and positive clipped phase polygons independently, then combines them into one template. Both phase boundaries lie on the same straight interface and share the prescribed interface endpoints, but **interior interface nodes are intentionally nonconforming**: for example, one side may use 5 interface nodes while the other uses 3. Maximum-weight matching is then applied independently through the disconnected phase connectivity to produce quad-dominant meshes, followed by constrained smoothing, validation, enrichment, phase-specific pressure numbering, and atomic publication of each `.dat`/JPEG pair.
+The generator meshes the negative and positive clipped phase polygons independently, then combines them into one template. Both phase boundaries lie on the same straight interface and share the prescribed interface endpoints, but **interior interface nodes are intentionally nonconforming**: one side may have a different number of interface nodes from the other.
 
-Mesh size is controlled primarily by `--target-elements` and `--max-elements`. The default objective is about **10 primary cells total** across both phases; the target is divided between phases using their areas with a balancing bias so both phases receive useful resolution. Difficult cuts may add cells for quality, but a successful template may never exceed the default hard cap of **20 primary cells**. `--target-edge-length` is retained as a legacy compatibility option and is no longer the primary mesh-size control.
+### Polygon-specific meshing strategy
 
-Quad dominance is an objective for the current admissible pairing graph, not a claim of globally optimal quadrilateral meshing. Valid unmatched triangles are retained. A finite template set does not cover arbitrarily degenerate cuts.
+The clipped phase polygon is classified before meshing. Only convex triangles, quadrilaterals and pentagons occur for the supported straight cuts.
+
+- **Triangle:** aspect ratio is `longest_edge^2 / (2*area)`. If it is below `--triangle-aspect-threshold` (default **3**), the polygon is kept as one triangle. A thin triangle is peeled from its wide end into quadrilateral strips; one geometrically similar narrow triangle is deliberately retained at the tip.
+- **Quadrilateral:** regular quads (`aspect <= --quad-aspect-threshold`, default **3**) are split into **2 or 4 quads** according to size. Thin/distorted quads use a structured bilinear grid with more subdivisions along the long direction, bounded by the phase and global element budgets.
+- **Pentagon:** all five possible triangle+quad ear diagonals are assessed. A clean pentagon may use the best valid 2-cell split. If a boundary edge is very small (below `--pentagon-small-edge-fraction`, default **0.15** of the longest edge), or the 2-cell split is poor, the fallback is a robust **5-quad center/mid-edge decomposition**. This localizes the short edge rather than creating a skinny triangulation fan.
+
+The polygon strategy directly constructs the final primary triangles/quads; triangle pairing is no longer part of the active generation path. Constrained smoothing, validation, enrichment, pressure numbering and atomic publication still run afterward.
+
+Mesh size remains bounded by `--max-elements` (default **20**). `--target-elements` is now a sizing hint mainly used for distorted quadrilateral subdivision; regular triangles intentionally ignore it and remain single cells. `--target-edge-length` remains a legacy compatibility option.
+
+**Case 11 note:** the fixed diagonal creates two regular triangles, both below the default aspect threshold. Therefore the new rules produce one canonical two-triangle template. The generator emits one unique case-11 template even when `--templates-per-case` is larger.
 
 See [docs/DATASET_FORMAT.md](docs/DATASET_FORMAT.md) for the versioned data contract.
 
